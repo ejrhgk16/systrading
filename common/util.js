@@ -3,8 +3,9 @@ import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import YahooFinance from 'yahoo-finance2';
 import {rest_client} from './client.js';
-import { consoleLogger } from './logger.js';
+import { consoleLogger, fileLogger } from './logger.js';
 import axios from 'axios';
+import cron from 'node-cron';
 
 const yahooFinance = new YahooFinance();
 
@@ -23,7 +24,7 @@ export async function getWeeklyOpen(symbol){
     
         // 현재 주 정보 출력 (기존 로직)
         const latestCandle = candles[0];
-        const [startTime, openPrice] = latestCandle;// [타임스탬프,    시가,     고가,     저가,     종가,    ...],
+        const [, openPrice] = latestCandle;// [타임스탬프,    시가,     고가,     저가,     종가,    ...],
   
         return openPrice
   
@@ -311,3 +312,33 @@ export async function getCandles_yahoo(symbol, days_ago) {
         throw error;
     }
 }
+
+
+export const CRON_JOB_TIMEOUT_MS = 10 * 60 * 1000;
+
+export const runWithTimeout = (taskFn, label, timeoutMs = CRON_JOB_TIMEOUT_MS) => {
+  consoleLogger.info(`${label} 실행`);
+  let timerId;
+  const timeout = new Promise((_, reject) => {
+    timerId = setTimeout(() => reject(new Error(`${label} 시간 초과! (${timeoutMs / 1000}초)`)), timeoutMs);
+  });
+  Promise.race([taskFn(), timeout])
+    .then(() => consoleLogger.info(`${label} 완료`))
+    .catch(err => {
+      consoleLogger.error(`${label} 오류발생:`, err);
+      fileLogger.error(`${label} 오류발생:`, err);
+    })
+    .finally(() => {
+      clearTimeout(timerId);
+      console.log(' ');
+    });
+};
+
+export const scheduleWithWatchdog = (expression, taskFn) => {
+  const task = cron.schedule(expression, taskFn, { timezone: 'UTC' });
+  task.on('execution:missed', () => {
+    consoleLogger.warn('[MISSED] 크론 누락 → 즉시 재실행');
+    fileLogger.warn('[MISSED] 크론 누락 → 즉시 재실행');
+    task.execute();
+  });
+};

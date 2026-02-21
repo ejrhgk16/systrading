@@ -2,194 +2,101 @@ import dotenv from 'dotenv';
 dotenv.config({ override: true });
 
 import {rest_client, ws_client, ws_api_client, WS_KEY_MAP} from './common/client.js';
-import { v4 as uuidv4 } from 'uuid';
 import alogo2 from './alogs_crypto/alog2Class.js';
-import { fileLogger, consoleLogger } from './common/logger.js'; // 로거 import
-import cron from 'node-cron';
+import { fileLogger, consoleLogger } from './common/logger.js';
 import { getSpxVixData } from './alogs_finance/alog1Class_spx_vix.js';
+import { runWithTimeout, scheduleWithWatchdog } from './common/util.js';
 
 import { auth } from './db/firebaseConfig.js';
 import { signInWithEmailAndPassword } from "firebase/auth";
 
 
-const symbols = ['BTCUSDT', 'ETHUSDT'];//, 'SOLUSDT'
+const symbols = ['BTCUSDT', 'ETHUSDT'];
 
 const alog2Objs_bb2 = symbols.reduce((acc, symbol) => {
   acc[symbol] = new alogo2(symbol, 2);
   return acc;
 }, {});
 
-// const alog2Objs_bb1 = symbols.reduce((acc, symbol) => {
-//   acc[symbol] = new alogo2(symbol, 1);
-//   return acc;
-// }, {});
 
 
-async function main(){//웹소켓 셋 및 스케줄링
+async function main() {
 
   consoleLogger.info("env_version : ", process.env.env_ver)
 
-    // --- 1. Firebase 인증 ---
   try {
     consoleLogger.info("Firebase 로그인을 시도합니다...");
-    const email = process.env.FIREBASE_USER_EMAIL;
-    const password = process.env.FIREBASE_USER_PASSWORD;
-    await signInWithEmailAndPassword(auth, email, password);
+    await signInWithEmailAndPassword(auth, process.env.FIREBASE_USER_EMAIL, process.env.FIREBASE_USER_PASSWORD);
     consoleLogger.info("Firebase 로그인 성공.");
   } catch (error) {
     consoleLogger.error("Firebase 로그인 실패:", error);
-    process.exit(1); // 로그인 실패 시 프로세스 종료
+    process.exit(1);
   }
 
-
   await Promise.all(Object.values(alog2Objs_bb2).map(obj => obj.set()));
-  // await Promise.all(Object.values(alog2Objs_bb1).map(obj => obj.set()));
 
+  scheduleWithWatchdog('1 0 */4 * * *', () =>
+    runWithTimeout(
+      () => Promise.all(Object.values(alog2Objs_bb2).map(obj => obj.scheduleFunc())),
+      '4시간 캔들용 작업'
+    )
+  );
 
-
-  // --- 타임아웃 시간 10분 ---
-  const CRON_JOB_TIMEOUT_MS = 10 * 60 * 1000;
-  const cronExpression = '1 0 */4 * * *';
-
-  cron.schedule(cronExpression, () => {
-    consoleLogger.info("4시간 캔들용 작업 실행");
-
-    // 실제 작업 내용
-    // const mainTask1 = Promise.all(Object.values(alog2Objs_bb1).map(obj => obj.scheduleFunc()));
-    const mainTask2 = Promise.all(Object.values(alog2Objs_bb2).map(obj => obj.scheduleFunc()));
-
-    const allMainTasks = Promise.all([mainTask2]);
-    
-    // 타임아웃을 감시하는 프로미스
-    const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
-            reject(new Error(`크론 작업 시간 초과! (${CRON_JOB_TIMEOUT_MS / 1000}초 이상 실행됨)`));
-        }, CRON_JOB_TIMEOUT_MS);
-    });
-
-    // Promise.race
-    Promise.race([allMainTasks, timeoutPromise])
-        .then(() => {
-            consoleLogger.info("4시간 캔들용 작업 완료");
-        })
-        .catch(error => {
-            // mainTask의 오류 또는 타임아웃 오류
-            consoleLogger.error('4시간 캔들용 작업 오류발생:', error);
-            fileLogger.error('4시간 캔들용 작업 오류발생:', error);
-        })
-        .finally(() => {
-            console.log(" ");
-        });
-
-  }, {
-    timezone: 'UTC'
-  });
-
-  cron.schedule('30 21 * * *', () => {
-    consoleLogger.info('매일 21시 30분(UTC) 작업 실행: getSpxVixData');
-  
-    const spxVixTask = getSpxVixData();
-  
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`getSpxVixData 작업 시간 초과! (${CRON_JOB_TIMEOUT_MS / 1000}초 이상 실행됨)`));
-      }, CRON_JOB_TIMEOUT_MS);
-    });
-  
-    Promise.race([spxVixTask, timeoutPromise])
-      .then(() => {
-        consoleLogger.info('getSpxVixData 작업 완료');
-      })
-      .catch(error => {
-        consoleLogger.error('getSpxVixData 작업 오류 발생:', error);
-        fileLogger.error('getSpxVixData 작업 오류 발생:', error);
-      })
-      .finally(() => {
-        console.log(" ");
-      });
-  }, {
-    timezone: 'UTC'
-  });
-
-  // cron.schedule('0 0 * * *', async () => { // 매일 23:59분 마다
-  //   consoleLogger.info("=====================================================================")
-  //   //하루 거래내역및 pnl 출력 추가 할 거
-  // }, {
-  //   timezone: 'UTC'
-  // });
+  scheduleWithWatchdog('30 21 * * *', () =>
+    runWithTimeout(() => getSpxVixData(), 'getSpxVixData 작업')
+  );
 
   ws_client.subscribeV5('order', 'linear');
-
   await ws_client.connectWSAPI();
 }
 
 main();
 
+
 ws_client.on('update', async (res) => {
   try {
-    if(res?.topic == "order"){
-      const data = res?.data
-      data.forEach(element => {
-
-        // const orderLinkId_algo2_bb1 = `alog2_${element.symbol}_bb1`
-        const orderLinkId_alog2_bb2 = `alog2_${element.symbol}_bb2`
-
-        // if((element.orderLinkId).indexOf(orderLinkId_algo2_bb1) > -1){
-        //   const alog2ObjTemp_bb1 = alog2Objs_bb1[element.symbol]
-        //   if (alog2ObjTemp_bb1) {
-        //     alog2ObjTemp_bb1.orderEventHandle(element)
-        //   } else {
-        //       consoleLogger.warn(`수신된 주문 이벤트의 심볼(${element.symbol})에 해당하는 객체를 찾을 수 없습니다.`);
-        //   }
-        // }
-
-        if((element.orderLinkId).indexOf(orderLinkId_alog2_bb2) > -1){
-          const alog2ObjTemp_bb2 = alog2Objs_bb2[element.symbol]
-          if (alog2ObjTemp_bb2) {
-            alog2ObjTemp_bb2.orderEventHandle(element)
-          } else {
-              consoleLogger.warn(`수신된 주문 이벤트의 심볼(${element.symbol})에 해당하는 객체를 찾을 수 없습니다.`);
-          }
+    if (res?.topic !== 'order') return;
+    res.data.forEach(element => {
+      const orderLinkId_alog2_bb2 = `alog2_${element.symbol}_bb2`;
+      if ((element.orderLinkId).indexOf(orderLinkId_alog2_bb2) > -1) {
+        const obj = alog2Objs_bb2[element.symbol];
+        if (obj) {
+          obj.orderEventHandle(element);
+        } else {
+          consoleLogger.warn(`수신된 주문 이벤트의 심볼(${element.symbol})에 해당하는 객체를 찾을 수 없습니다.`);
         }
-        
-      });
-    }
-  } catch(e) {
+      }
+    });
+  } catch (e) {
     consoleLogger.error('ws_client \'update\' 이벤트 처리 중 오류 발생:', e);
     fileLogger.error('ws_client \'update\' 이벤트 처리 중 오류 발생:', e);
   }
 });
 
-// 연결이 닫혔을 때, 그 이유를 포함하여 로그를 남깁니다.
 ws_client.on('close', (event) => {
   consoleLogger.warn('ws connection closed. Event:', event);
   fileLogger.warn('ws connection closed. Event:', event);
 });
 
-// 에러 발생 시, 상세한 에러 정보를 로그로 남깁니다.
 ws_client.on('error', (err) => {
   consoleLogger.error('ws connection error:', err);
   fileLogger.error('ws connection error:', err);
 });
 
-ws_client.on('open', ({ wsKey, event }) => {
+ws_client.on('open', ({ wsKey }) => {
   consoleLogger.info(`ws connection open for ${wsKey}`);
 });
 
-ws_client.on('response', (response) => {
-  // console.log('ws response: ', response);
-});
+ws_client.on('response', () => {});
 
-// 재연결 시작 시, 파일에도 로그를 남깁니다.
 ws_client.on('reconnect', ({ wsKey }) => {
-  const reconnectMessage = `ws automatically reconnecting.... ${wsKey}`;
-  consoleLogger.info(reconnectMessage);
-  fileLogger.info(reconnectMessage);
+  const msg = `ws automatically reconnecting.... ${wsKey}`;
+  consoleLogger.info(msg);
+  fileLogger.info(msg);
 });
 
-// 재연결 성공 시, 파일에도 로그를 남깁니다.
 ws_client.on('reconnected', ({ wsKey }) => {
-  const reconnectedMessage = `ws has reconnected ${wsKey}`;
-  consoleLogger.info(reconnectedMessage);
-  fileLogger.info(reconnectedMessage);
+  const msg = `ws has reconnected ${wsKey}`;
+  consoleLogger.info(msg);
+  fileLogger.info(msg);
 });
