@@ -5,7 +5,7 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from '../db/firebaseConfig.js';
 import { ws_client } from '../common/client.js';
 import { consoleLogger } from '../common/logger.js';
-import alogo2 from '../alogs_crypto/alog2Class.js';
+import algo2 from '../alogs_crypto/algo2Class.js';
 
 // --- Mocking Section ---
 const mockUtil = {
@@ -27,7 +27,7 @@ const mockUtil = {
 
 // --- Test Runner Section ---
 
-alogo2.prototype.getKline = mockUtil.getKline;
+algo2.prototype.getKline = mockUtil.getKline;
 
 async function runHybridTestScenario() {
   consoleLogger.info('--- Algo2 Hybrid Test Start ---');
@@ -46,7 +46,7 @@ async function runHybridTestScenario() {
   }
 
   const testSymbol = 'BTCUSDT';
-  const algoInstance = new alogo2(testSymbol);
+  const algoInstance = new algo2(testSymbol);
 
   // --- 1단계: 초기화 ---
   consoleLogger.info('\n--- STEP 1: Initialization ---');

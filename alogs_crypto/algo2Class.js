@@ -10,11 +10,11 @@ import {getKline, setMsgFormat, sendTelegram, runWithTimeout} from '../common/ut
 import {getTradeStatus, setTradeStatus, addTradeLog } from '../db/firestoreFunc.js';
 import {fileLogger, consoleLogger} from '../common/logger.js';
 
-export default class alogo2{
+export default class algo2{
 
     constructor(symbol, std = 2) {
 
-        this.name = `alog2_${symbol}_bb${std}`;
+        this.name = `algo2_${symbol}_bb${std}`;
 
         this.qtyMultiplier = 0// 수량설정을 위한 소수점 자릿수에 따른 승수
         this.priceMultiplier = 0
@@ -74,8 +74,8 @@ export default class alogo2{
             
         }
 
-        const alog2State = { ...this };
-        await setTradeStatus(docId, alog2State)
+        const algo2State = { ...this };
+        await setTradeStatus(docId, algo2State)
 
         consoleLogger.info(this.name + ' 초기 설정 완료 captial : ', this)
         
@@ -458,8 +458,8 @@ export default class alogo2{
         }
 
         const docId = this.getTradeStatusDocId()
-        const alog2State = { ...this };
-        setTradeStatus(docId, alog2State)
+        const algo2State = { ...this };
+        setTradeStatus(docId, algo2State)
 
         const msg = {
             orderLinkId : dataObj?.orderLinkId,

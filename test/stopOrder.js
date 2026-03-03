@@ -19,7 +19,7 @@ const PLACE_EXIT2 = true;
 const PLACE_EXIT3 = true;
 // ====================
 
-const name = `alog2_${SYMBOL}_bb${STD}`;
+const name = `algo2_${SYMBOL}_bb${STD}`;
 const docId = `algo2_${name}_trade_status`;
 
 const priceMultiplier = Math.pow(10, Number(process.env[SYMBOL + '_decimal_price']));

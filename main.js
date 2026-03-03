@@ -1,23 +1,23 @@
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
 
-import {rest_client, ws_client, ws_api_client, WS_KEY_MAP} from './common/client.js';
-import alogo2 from './alogs_crypto/alog2Class.js';
+import { ws_client } from './common/client.js';
+import algo3 from './alogs_crypto/algo3Class.js';
+import Algo3AccountStatus from './account/algo3AccountStatus.js';
 import { fileLogger, consoleLogger } from './common/logger.js';
-import { getSpxVixData } from './alogs_finance/alog1Class_spx_vix.js';
+import { getSpxVixData } from './alogs_tradifi/alog1Class_spx_vix.js';
 import { runWithTimeout, scheduleWithWatchdog } from './common/util.js';
 
 import { auth } from './db/firebaseConfig.js';
 import { signInWithEmailAndPassword } from "firebase/auth";
 
 
-const symbols = ['BTCUSDT', 'ETHUSDT'];
-
-const alog2Objs_bb2 = symbols.reduce((acc, symbol) => {
-  acc[symbol] = new alogo2(symbol, 2);
+const algo3Symbols = ['BTCUSDT', 'ETHUSDT'];
+const algo3AccountStatus = new Algo3AccountStatus(algo3Symbols.length);
+const algo3Objs = algo3Symbols.reduce((acc, symbol) => {
+  acc[symbol] = new algo3(symbol, algo3AccountStatus);
   return acc;
 }, {});
-
 
 
 async function main() {
@@ -33,11 +33,12 @@ async function main() {
     process.exit(1);
   }
 
-  await Promise.all(Object.values(alog2Objs_bb2).map(obj => obj.set()));
+  await algo3AccountStatus.load();
+  await Promise.all(Object.values(algo3Objs).map(obj => obj.set()));
 
   scheduleWithWatchdog('1 0 */4 * * *', () =>
     runWithTimeout(
-      () => Promise.all(Object.values(alog2Objs_bb2).map(obj => obj.scheduleFunc())),
+      () => Promise.all(Object.values(algo3Objs).map(obj => obj.scheduleFunc())),
       '4시간 캔들용 작업'
     )
   );
@@ -57,14 +58,11 @@ ws_client.on('update', async (res) => {
   try {
     if (res?.topic !== 'order') return;
     res.data.forEach(element => {
-      const orderLinkId_alog2_bb2 = `alog2_${element.symbol}_bb2`;
-      if ((element.orderLinkId).indexOf(orderLinkId_alog2_bb2) > -1) {
-        const obj = alog2Objs_bb2[element.symbol];
-        if (obj) {
-          obj.orderEventHandle(element);
-        } else {
-          consoleLogger.warn(`수신된 주문 이벤트의 심볼(${element.symbol})에 해당하는 객체를 찾을 수 없습니다.`);
-        }
+      const orderLinkId_algo3 = `algo3_${element.symbol}_bb`;
+      if (element.orderLinkId.indexOf(orderLinkId_algo3) > -1) {
+        const obj = algo3Objs[element.symbol];
+        if (obj) obj.orderEventHandle(element);
+        else consoleLogger.warn(`algo3: 심볼(${element.symbol})에 해당하는 객체 없음`);
       }
     });
   } catch (e) {

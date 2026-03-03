@@ -89,6 +89,11 @@ All trading parameters are in `.env` (never committed). Key patterns:
 ### Firestore Document IDs
 Position state documents use `algo2_{SYMBOL}` (e.g., `algo2_BTCUSDT`). The algo calls `getTradeStatus` on startup to restore state after restarts.
 
+## Python Backtesting Reference: `pythonBacktestcode/`
+
+새 Node.js 전략을 개발할 때 참고할 수 있는 파이썬 백테스트 코드 모음.
+사용자가 명시적으로 참고하라고 할 때만 이 폴더의 코드를 참조할 것.
+
 ## Dependencies
 
 - `bybit-api` — Exchange REST + WebSocket

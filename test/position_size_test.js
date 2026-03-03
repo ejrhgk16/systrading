@@ -1,12 +1,12 @@
 
-import alogo2 from '../alogs_crypto/alog2Class.js';
+import algo2 from '../alogs_crypto/algo2Class.js';
 import { getKline } from '../common/util.js';
 import { calculateAlligator } from '../common/indicatior.js';
 
 async function test_calculatePositionSize() {
     // 1. Initialize
     const symbol = 'SOLUSDT'; // Using BTCUSDT as an example
-    const bot = new alogo2(symbol);
+    const bot = new algo2(symbol);
     await bot.set(); // Initialize capital, leverage, etc. from .env
 
     // Ensure capital is set

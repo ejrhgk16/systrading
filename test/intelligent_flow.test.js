@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config({ override: true });
 
 import { ws_client } from '../common/client.js';
-import alogo2 from '../alogs_crypto/alog2Class.js';
+import algo2 from '../alogs_crypto/algo2Class.js';
 import { fileLogger, consoleLogger } from '../common/logger.js';
 import { auth } from '../db/firebaseConfig.js';
 import { signInWithEmailAndPassword } from "firebase/auth";
@@ -55,11 +55,11 @@ async function testMainFlow() {
   }
 
   // 2. algo2 객체 생성 및 초기화
-  const alog2Objs = symbols.reduce((acc, symbol) => {
-    acc[symbol] = new alogo2(symbol);
+  const algo2Objs = symbols.reduce((acc, symbol) => {
+    acc[symbol] = new algo2(symbol);
     return acc;
   }, {});
-  await Promise.all(Object.values(alog2Objs).map(obj => obj.set()));
+  await Promise.all(Object.values(algo2Objs).map(obj => obj.set()));
 
   // 3. 웹소켓 연결 및 이벤트 리스너 설정
   ws_client.subscribeV5('order', 'linear');
@@ -69,9 +69,9 @@ async function testMainFlow() {
     if (res?.topic === "order") {
       const data = res?.data || [];
       data.forEach(element => {
-        if (element.symbol && alog2Objs[element.symbol]) {
+        if (element.symbol && algo2Objs[element.symbol]) {
           consoleLogger.info(`[WebSocket Event] ${element.symbol}의 주문 업데이트 수신`);
-          alog2Objs[element.symbol].orderEventHandle(element);
+          algo2Objs[element.symbol].orderEventHandle(element);
         }
       });
     }
@@ -84,7 +84,7 @@ async function testMainFlow() {
   // 4. 강제 진입을 위해 scheduleFunc 즉시 실행
   consoleLogger.info("--- [테스트] BTCUSDT 강제 진입을 위해 scheduleFunc를 즉시 실행합니다. ---");
   try {
-    await alog2Objs['BTCUSDT'].scheduleFunc();
+    await algo2Objs['BTCUSDT'].scheduleFunc();
     consoleLogger.info("--- [테스트] 진입 주문 전송 시도 완료. 이제 웹소켓의 체결 이벤트를 기다립니다... ---");
   } catch (error) {
     consoleLogger.error("즉시 실행 중 오류 발생:", error);

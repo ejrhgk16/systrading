@@ -374,6 +374,53 @@ export function calculateKeltnerChannel(candles, period = 20, atrPeriod = 10, mu
 }
 
 /**
+ * ATR (Average True Range)를 계산합니다. (Wilder's Smoothing)
+ * @param {Array} candles - K-line 데이터 배열. 오래된 데이터가 앞에 오도록 정렬되어 있어야 합니다.
+ * @param {number} period - 계산 기간 (일반적으로 14)
+ * @param {number} when - 0:현재 캔들 기준, 1:이전 캔들 기준
+ * @returns {number | null} - ATR 값
+ */
+export function calculateATR(candles, period = 14, when = 0) {
+  try {
+    if (!candles || candles.length < period + 1 + when) {
+      consoleLogger.error(`ATR 계산을 위한 충분한 캔들 데이터가 없습니다. (필요: ${period + 1 + when}, 확보: ${candles.length})`);
+      return null;
+    }
+
+    const trueRanges = [];
+    for (let i = 1; i < candles.length; i++) {
+      const high = parseFloat(candles[i][2]);
+      const low  = parseFloat(candles[i][3]);
+      const prevClose = parseFloat(candles[i - 1][4]);
+      trueRanges.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+    }
+
+    // 첫 ATR: SMA
+    let atr = trueRanges.slice(0, period).reduce((sum, tr) => sum + tr, 0) / period;
+    const atrValues = new Array(period - 1).fill(undefined);
+    atrValues.push(atr);
+
+    // 이후: Wilder's Smoothing
+    for (let i = period; i < trueRanges.length; i++) {
+      atr = (atr * (period - 1) + trueRanges[i]) / period;
+      atrValues.push(atr);
+    }
+
+    const resultIndex = atrValues.length - 1 - when;
+    if (resultIndex < 0 || atrValues[resultIndex] === undefined) {
+      consoleLogger.error(`ATR 계산 결과가 요청된 "when"(${when}) 값을 반환하기에 충분하지 않습니다.`);
+      return null;
+    }
+
+    return atrValues[resultIndex];
+
+  } catch (error) {
+    consoleLogger.error('ATR 계산 중 오류 발생:', error);
+    return null;
+  }
+}
+
+/**
  * RSI (Relative Strength Index)를 계산합니다.
  * @param {Array} candles - K-line 데이터 배열. 오래된 데이터가 앞에 오도록 정렬되어 있어야 합니다.
  * @param {number} period - 계산 기간 (일반적으로 14)

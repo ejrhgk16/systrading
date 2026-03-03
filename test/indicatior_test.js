@@ -15,7 +15,7 @@ async function runTest(testName, testFunction) {
 
 // 메인 테스트 함수
 async function main() {
-  // alogo2Class.js와 유사하게 데이터를 가져옵니다.
+  // algo2Class.js와 유사하게 데이터를 가져옵니다.
   // 여기서는 'BTCUSDT'와 '60'분봉을 예시로 사용합니다.
   const symbol = 'ETHUSDT';
   const interval = '240';

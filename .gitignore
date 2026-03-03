@@ -3,5 +3,6 @@
 
 # Dependencies
 /node_modules
+/pythonBacktestcode
 
 /logs 
