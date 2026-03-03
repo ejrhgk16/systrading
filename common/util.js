@@ -272,7 +272,7 @@ export async function sendTelegram(text) {
     return response.data;
   } catch (error) {
     console.error('Error sending Telegram message:', error.response ? error.response.data : error.message);
-    throw error;
+    return null;
   }
 }
 
@@ -322,7 +322,7 @@ export const runWithTimeout = (taskFn, label, timeoutMs = CRON_JOB_TIMEOUT_MS) =
   const timeout = new Promise((_, reject) => {
     timerId = setTimeout(() => reject(new Error(`${label} 시간 초과! (${timeoutMs / 1000}초)`)), timeoutMs);
   });
-  Promise.race([taskFn(), timeout])
+  return Promise.race([taskFn(), timeout])
     .then(() => consoleLogger.info(`${label} 완료`))
     .catch(err => {
       consoleLogger.error(`${label} 오류발생:`, err);

@@ -5,7 +5,7 @@ dotenv.config({ override: true });
 
 import {rest_client, ws_client, ws_api_client, WS_KEY_MAP} from '../common/client.js';
 import {calculateDMI, calculateBB, calculateEMA, calculateAlligator} from '../common/indicatior.js';
-import {getKline, setMsgFormat, sendTelegram} from '../common/util.js';
+import {getKline, setMsgFormat, sendTelegram, runWithTimeout} from '../common/util.js';
 
 import {getTradeStatus, setTradeStatus, addTradeLog } from '../db/firestoreFunc.js';
 import {fileLogger, consoleLogger} from '../common/logger.js';
@@ -154,17 +154,19 @@ export default class alogo2{
         
         consoleLogger.order(`${this.name} open 주문 요청 !!`, orderParams);
 
-        ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', orderParams)
-        .catch((e) => {
+        runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', orderParams),
+            `${this.name} open order`, 60000
+        ).catch((e) => {
             fileLogger.error('open error:', e);
             consoleLogger.error('open error:', e);
             consoleLogger.error('open error >>> reset후 재주문 요청');
             this.reset();
             this.open();
         });
-        
+
     }
-    
+
     async openOrderFilledCallback(){//오픈 포지션 체결되면 스탑설정 1번실행
 
         const data = await getKline(this.symbol, '240', 200)
@@ -214,22 +216,27 @@ export default class alogo2{
         };
         
         consoleLogger.order(`${this.name} 1차 청산 설정`, exit1Params);
-        ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit1Params)
-            .catch((e) => {
-                fileLogger.error('order exit1 error:', e);
-                consoleLogger.error('order exit1 error:', e);
-                consoleLogger.error('order exit1 error 강제 청산 실행');
-                const marketCloseParams = { ...exit1Params }; 
-                delete marketCloseParams.triggerPrice;
-                delete marketCloseParams.triggerDirection;
-                delete marketCloseParams.triggerBy;
-                delete marketCloseParams.timeInForce;
+        runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit1Params)
+                .catch((e) => {
+                    fileLogger.error('order exit1 error:', e);
+                    consoleLogger.error('order exit1 error:', e);
+                    consoleLogger.error('order exit1 error 강제 청산 실행');
+                    const marketCloseParams = { ...exit1Params };
+                    delete marketCloseParams.triggerPrice;
+                    delete marketCloseParams.triggerDirection;
+                    delete marketCloseParams.triggerBy;
+                    delete marketCloseParams.timeInForce;
 
-                this.setNewOrderId()
-                marketCloseParams.orderLinkId = this.orderId_exit_1
-                ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', marketCloseParams)        
-        
-            });
+                    this.setNewOrderId();
+                    marketCloseParams.orderLinkId = this.orderId_exit_1;
+                    return runWithTimeout(
+                        () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', marketCloseParams),
+                        `${this.name} fallback exit1`, 60000
+                    );
+                }),
+            `${this.name} create exit1`, 60000
+        );
 
         const exit2Params = {
             category: "linear",
@@ -244,27 +251,32 @@ export default class alogo2{
             orderLinkId : this.orderId_exit_2,
             timeInForce: "GoodTillCancel"
         };
-        
+
         consoleLogger.order(`${this.name} 2차 청산 설정`, exit2Params);
-        ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit2Params)
-            .catch((e) => {
-                fileLogger.error('order exit2 error:', e);
-                consoleLogger.error('order exit2 error:', e);
-                consoleLogger.error('order exit2 error 강제 청산 실행');
-                
-                const marketCloseParams = { ...exit2Params }; 
-                delete marketCloseParams.triggerPrice;
-                delete marketCloseParams.triggerDirection;
-                delete marketCloseParams.triggerBy;
-                delete marketCloseParams.timeInForce;
+        runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit2Params)
+                .catch((e) => {
+                    fileLogger.error('order exit2 error:', e);
+                    consoleLogger.error('order exit2 error:', e);
+                    consoleLogger.error('order exit2 error 강제 청산 실행');
 
-                this.setNewOrderId()
-                marketCloseParams.orderLinkId = this.orderId_exit_2
-                ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', marketCloseParams)     
-        
-            });
+                    const marketCloseParams = { ...exit2Params };
+                    delete marketCloseParams.triggerPrice;
+                    delete marketCloseParams.triggerDirection;
+                    delete marketCloseParams.triggerBy;
+                    delete marketCloseParams.timeInForce;
 
-            
+                    this.setNewOrderId();
+                    marketCloseParams.orderLinkId = this.orderId_exit_2;
+                    return runWithTimeout(
+                        () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', marketCloseParams),
+                        `${this.name} fallback exit2`, 60000
+                    );
+                }),
+            `${this.name} create exit2`, 60000
+        );
+
+
         const exit3Params = {
             category: "linear",
             symbol: this.symbol,
@@ -278,25 +290,30 @@ export default class alogo2{
             orderLinkId : this.orderId_exit_3,
             timeInForce: "GoodTillCancel"
         };
-        
-        consoleLogger.order(`${this.name} 3차 청산 설정`, exit3Params);
-        ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit3Params)
-            .catch((e) => {
-                fileLogger.error('order exit3 error:', e);
-                consoleLogger.error('order exit3 error:', e);
-                consoleLogger.error('order exit3 error 강제 청산 실행');
-                
-                const marketCloseParams = { ...exit3Params }; 
-                delete marketCloseParams.triggerPrice;
-                delete marketCloseParams.triggerDirection;
-                delete marketCloseParams.triggerBy;
-                delete marketCloseParams.timeInForce;
 
-                this.setNewOrderId()
-                marketCloseParams.orderLinkId = this.orderId_exit_3
-                ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', marketCloseParams)     
-        
-            });
+        consoleLogger.order(`${this.name} 3차 청산 설정`, exit3Params);
+        runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit3Params)
+                .catch((e) => {
+                    fileLogger.error('order exit3 error:', e);
+                    consoleLogger.error('order exit3 error:', e);
+                    consoleLogger.error('order exit3 error 강제 청산 실행');
+
+                    const marketCloseParams = { ...exit3Params };
+                    delete marketCloseParams.triggerPrice;
+                    delete marketCloseParams.triggerDirection;
+                    delete marketCloseParams.triggerBy;
+                    delete marketCloseParams.timeInForce;
+
+                    this.setNewOrderId();
+                    marketCloseParams.orderLinkId = this.orderId_exit_3;
+                    return runWithTimeout(
+                        () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', marketCloseParams),
+                        `${this.name} fallback exit3`, 60000
+                    );
+                }),
+            `${this.name} create exit3`, 60000
+        );
 
 
     }
@@ -340,46 +357,43 @@ export default class alogo2{
             };
             
             consoleLogger.order(`${this.name} 1차 청산 주문 수정 요청`, amend1Params);
-            ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend1Params)
-                .catch((e) => {
-                    fileLogger.error('amend exit1 error:', e);
-                    consoleLogger.error('amend exit1 error:', e);
-                });
+            runWithTimeout(
+                () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend1Params),
+                `${this.name} amend exit1`, 60000
+            );
         }
 
         if(this.exit_count < 2){//청산 횟수가 0이거나 1일때
-            
+
             const amend2Params = {
                 category: "linear",
                 symbol: this.symbol,
                 triggerPrice: (this.exit_price_2).toString(),
                 orderLinkId : this.orderId_exit_2,
             };
-            
+
             consoleLogger.order(`${this.name} 2차 청산 주문 수정 요청`, amend2Params);
-            ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend2Params)
-                .catch((e) => {
-                    fileLogger.error('amend exit2 error:', e);
-                    consoleLogger.error('amend exit2 error:', e);
-            });
+            runWithTimeout(
+                () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend2Params),
+                `${this.name} amend exit2`, 60000
+            );
         }
 
-        
+
         if(this.exit_count < 3){//청산 횟수가 0이거나 1이거나 2일때
-            
+
             const amend3Params = {
                 category: "linear",
                 symbol: this.symbol,
                 triggerPrice: (this.exit_price_3).toString(),
                 orderLinkId : this.orderId_exit_3,
             };
-            
+
             consoleLogger.order(`${this.name} 3차 청산 주문 수정 요청`, amend3Params);
-            ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend3Params)
-                .catch((e) => {
-                    fileLogger.error('amend exit3 error:', e);
-                    consoleLogger.error('amend exit3 error:', e);
-            });
+            runWithTimeout(
+                () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend3Params),
+                `${this.name} amend exit3`, 60000
+            );
         }
 
     }
@@ -570,8 +584,10 @@ export default class alogo2{
         
         consoleLogger.order(`${this.name} open 주문 요청 !!`, orderParams);
 
-        ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', orderParams)
-        .catch((e) => {
+        runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', orderParams),
+            `${this.name} open_test order`, 60000
+        ).catch((e) => {
            consoleLogger.error('open_test error:', e);
            fileLogger.error('open_test error:', e);
         })
