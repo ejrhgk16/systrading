@@ -1,4 +1,4 @@
-import { calculateDMI, calculateBB, calculateEMA, calculateAlligator, calculateKeltnerChannel } from '../common/indicatior.js';
+import { calculateDMI, calculateBB, calculateEMA, calculateAlligator, calculateKeltnerChannel, calculateATR } from '../common/indicatior.js';
 import { getKline } from '../common/util.js';
 
 // 테스트 실행 함수
@@ -99,6 +99,38 @@ async function main() {
     console.assert(typeof kc === 'object', 'KC 결과는 객체여야 합니다.');
     console.assert(kc.upper && kc.middle && kc.lower, 'KC 객체에 upper, middle, lower 속성이 있어야 합니다.');
     console.assert(kc.upper > kc.middle && kc.middle > kc.lower, 'KC 값의 관계가 올바르지 않습니다.');
+  });
+
+  // --- ATR 테스트 ---
+  await runTest('calculateATR - (period: 14, when: 1) - algo3 진입 시 사용값', async () => {
+    const atr = calculateATR(klineData, 14, 1);
+
+    console.log(`  ATR (14, 1) Result: ${atr}`);
+    console.assert(atr !== null, 'ATR 결과가 null이면 안 됩니다.');
+    console.assert(typeof atr === 'number' && atr > 0, 'ATR은 양수여야 합니다.');
+
+    // algo3 atr_stop_price 계산 검증
+    const latestCandle = klineData[klineData.length - 1];
+    const current_open = parseFloat(latestCandle[1]);
+    const atr_multiplier = 2;
+    const atr_stop_long  = current_open - atr * atr_multiplier;
+    const atr_stop_short = current_open + atr * atr_multiplier;
+
+    console.log(`  current_open: ${current_open}`);
+    console.log(`  ATR stop (long):  ${current_open} - ${atr.toFixed(4)} * ${atr_multiplier} = ${atr_stop_long.toFixed(4)}`);
+    console.log(`  ATR stop (short): ${current_open} + ${atr.toFixed(4)} * ${atr_multiplier} = ${atr_stop_short.toFixed(4)}`);
+    console.assert(atr_stop_long < current_open, 'long ATR stop은 현재가보다 낮아야 합니다.');
+    console.assert(atr_stop_short > current_open, 'short ATR stop은 현재가보다 높아야 합니다.');
+  });
+
+  await runTest('calculateATR - (period: 14, when: 0) vs (when: 1) 비교', async () => {
+    const atr0 = calculateATR(klineData, 14, 0);
+    const atr1 = calculateATR(klineData, 14, 1);
+
+    console.log(`  ATR when=0 (현재 캔들): ${atr0}`);
+    console.log(`  ATR when=1 (이전 캔들): ${atr1}`);
+    console.assert(atr0 !== null && atr1 !== null, 'ATR 결과가 null이면 안 됩니다.');
+    console.assert(atr0 !== atr1, 'when=0과 when=1은 서로 다른 값이어야 합니다.');
   });
 
   console.log('\n모든 지표 테스트가 실제 데이터로 성공적으로 완료되었습니다.');

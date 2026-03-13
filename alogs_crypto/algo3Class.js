@@ -19,7 +19,7 @@ export default class algo3 {
         this.qtyMultiplier = 0;
         this.priceMultiplier = 0;
         this.leverage = 3;
-        this.max_risk_per_trade = 0.02;
+        this.max_risk_per_trade = 0.05;
         this.atr_multiplier = 2;
 
         this.orderSize = 0.0;
@@ -54,9 +54,15 @@ export default class algo3 {
         this.setNewOrderId();
 
         const docId = this.getTradeStatusDocId();
-        const data  = await getTradeStatus(docId);
-        if (data) {
-            Object.assign(this, data);
+        const isNew = process.env['algo3_isNew'] === 'true';
+
+        if (isNew) {
+            consoleLogger.info(`${this.name} algo3_isNew=true → Firestore 무시, 새 상태로 초기화`);
+        } else {
+            const data = await getTradeStatus(docId);
+            if (data) {
+                Object.assign(this, data);
+            }
         }
 
         await setTradeStatus(docId, this.getState());
@@ -93,7 +99,7 @@ export default class algo3 {
             this.positionType = null;
         }
 
-        consoleLogger.info(`${this.name} -- current_open: ${current_open}, positionType: ${this.positionType}, entry_allow: ${this.entry_allow}`);
+        consoleLogger.info(`${this.name} -- current_open: ${current_open}, positionType(bb): ${this.positionType}, entry_allow(adx): ${this.entry_allow}`);
 
         if (this.positionType == null || !this.entry_allow) return;
 
@@ -337,7 +343,8 @@ export default class algo3 {
     cancelOrders(orderLinkIds) {
         for (const orderLinkId of orderLinkIds) {
             if (!orderLinkId) continue;
-            const params = { category: 'linear', symbol: this.symbol, orderLinkId };
+            // ATR stop / alligator exits 모두 trigger 주문 → orderFilter: 'StopOrder' 필수
+            const params = { category: 'linear', symbol: this.symbol, orderLinkId, orderFilter: 'StopOrder' };
             runWithTimeout(
                 () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.cancel', params),
                 `${this.name} cancel ${orderLinkId}`, 60000
