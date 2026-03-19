@@ -294,18 +294,21 @@ export async function getCandles_yahoo(symbol, days_ago) {
     };
 
     try {
-        const results = await yahooFinance.historical(symbol, queryOptions);
+        const result = await yahooFinance.chart(symbol, queryOptions);
+        const quotes = result.quotes;
 
         // indicatior 함수들이 요구하는 배열 형식으로 데이터를 변환합니다.
         // [timestamp, open, high, low, close, volume]
-        const candles = results.map(r => [
-            r.date.getTime(),
-            r.open,
-            r.high,
-            r.low,
-            r.close,
-            r.volume
-        ]);
+        const candles = quotes
+            .filter(r => r.close !== null)
+            .map(r => [
+                new Date(r.date).getTime(),
+                r.open,
+                r.high,
+                r.low,
+                r.adjclose ?? r.close,
+                r.volume
+            ]);
         return candles;
     } catch (error) {
         console.error('Error fetching data from Yahoo Finance:', error);

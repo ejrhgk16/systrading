@@ -70,9 +70,28 @@ node test/final_flow.test.js
 - `firestoreFunc.js` — `getTradeStatus(docId)` / `setTradeStatus(docId, data, merge)` for position persistence; `addTradeLog()` for hierarchical trade history at `trade_log/{algo_id}/{date}/`
 
 ### Finance Algorithms: `alogs_finance/`
-- `alog1Class_spx_vix.js` — Fetches SPX RSI + VIX term structure via `yahoo-finance2`, sends Telegram summary
+- `algo1Class_spx_vix.js` — Fetches SPX RSI + VIX term structure via `yahoo-finance2`, sends Telegram summary
 
 ## Key Conventions
+
+### 알고리즘 명명규칙
+- **ta** = tradifi, **ca** = crypto + 숫자 = algo 번호
+- `ca3` — crypto algo3 (`alogs_crypto/algo3Class.js`, BTC/ETH BB+ADX)
+- `ta2` (= `qg`) — tradifi algo2 (`alogs_tradifi/algo2Class_qqq_gld.js`, QQQ+GLD 트렌치)
+- CLI 커맨드 prefix로 사용: `ta2 status`, `qg pending` 등
+
+### CLI 서브 프롬프트 패턴
+`common/cli.js`는 인터랙티브 서브 프롬프트를 지원한다. `handleCommand`가 string을 반환하면 바로 출력, `{ prompt, handler }` 객체를 반환하면 prompt를 출력하고 다음 입력을 handler에 전달한다.
+
+```
+> ta2 init
+QLD주수 QLD현재가 UGL주수 UGL현재가 순서로 입력하세요
+예) 39 85.5 40 52.3
+> 39 85.5 40 52.3
+=== 초기 세팅 완료 ===
+```
+
+`init`, `add`, `confirm` 커맨드가 이 패턴을 사용한다.
 
 ### Order Linking
 Order IDs follow the pattern `alog2_{symbol}_bb2` (e.g., `alog2_BTCUSDT_bb2`). The WebSocket handler in `main.js` uses this to route fill events to the correct algo instance.

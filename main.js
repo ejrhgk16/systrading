@@ -5,8 +5,10 @@ import { ws_client } from './common/client.js';
 import algo3 from './alogs_crypto/algo3Class.js';
 import Algo3AccountStatus from './account/algo3AccountStatus.js';
 import { fileLogger, consoleLogger } from './common/logger.js';
-import { getSpxVixData } from './alogs_tradifi/alog1Class_spx_vix.js';
-import { runWithTimeout, scheduleWithWatchdog } from './common/util.js';
+import { getSpxVixData } from './alogs_tradifi/algo1Class_spx_vix.js';
+import { Algo2QqqGld } from './alogs_tradifi/algo2Class_qqq_gld.js';
+import { runWithTimeout, scheduleWithWatchdog, CRON_JOB_TIMEOUT_MS } from './common/util.js';
+import { initCLI } from './common/cli.js';
 
 import { auth } from './db/firebaseConfig.js';
 import { signInWithEmailAndPassword } from "firebase/auth";
@@ -18,6 +20,8 @@ const algo3Objs = algo3Symbols.reduce((acc, symbol) => {
   acc[symbol] = new algo3(symbol, algo3AccountStatus);
   return acc;
 }, {});
+
+const qqgGldAlgo = new Algo2QqqGld();
 
 
 async function main() {
@@ -35,6 +39,7 @@ async function main() {
 
   await algo3AccountStatus.load();
   await Promise.all(Object.values(algo3Objs).map(obj => obj.set()));
+  await qqgGldAlgo.set();
 
   scheduleWithWatchdog('1 0 */4 * * *', () =>
     runWithTimeout(
@@ -43,9 +48,17 @@ async function main() {
     )
   );
 
+  // scheduleWithWatchdog('30 21 * * *', () =>
+  //   runWithTimeout(() => getSpxVixData(), 'getSpxVixData 작업')
+  // );
+
+  // QQQ+GLD 트렌치 전략: 매일 UTC 22:00 (미국장 마감 후)
   scheduleWithWatchdog('30 21 * * *', () =>
-    runWithTimeout(() => getSpxVixData(), 'getSpxVixData 작업')
+    runWithTimeout(() => qqgGldAlgo.scheduleFunc(), 'QQQ+GLD 트렌치', CRON_JOB_TIMEOUT_MS)
   );
+
+  // CLI 초기화 (ta2=tradifi algo2, qg=QQQ+GLD 단축어)
+  initCLI({ ta2: qqgGldAlgo, qg: qqgGldAlgo });
 
   ws_client.subscribeV5('order', 'linear');
   await ws_client.connectWSAPI();

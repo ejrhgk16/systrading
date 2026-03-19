@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config({ override: true });
 
 import { ws_client, WS_KEY_MAP } from '../common/client.js';
-import { calculateDMI, calculateBB, calculateAlligator, calculateATR } from '../common/indicatior.js';
+import { calculateDMI, calculateBB, calculateAlligator, calculateATR, calculateRSI, calculateKeltnerChannel } from '../common/indicatior.js';
 import { getKline, setMsgFormat, sendTelegram, runWithTimeout } from '../common/util.js';
 import { getTradeStatus, setTradeStatus, addTradeLog } from '../db/firestoreFunc.js';
 import { fileLogger, consoleLogger } from '../common/logger.js';
@@ -147,22 +147,17 @@ export default class algo3 {
 
     async openOrderFilledCallback() {
         const data = await getKline(this.symbol, '240', 200);
-        const alligatorObj = calculateAlligator(data, 0);
 
-        const lips_8   = Math.round(alligatorObj.lips  * this.priceMultiplier) / this.priceMultiplier;
-        const teeth_13 = Math.round(alligatorObj.teeth * this.priceMultiplier) / this.priceMultiplier;
-        const jaw_21   = Math.round(alligatorObj.jaw   * this.priceMultiplier) / this.priceMultiplier;
+        // KC 3개 채널로 청산 가격 계산 (KC lengths: 5, 15, 25 / ATR period: 14 / multiplier: 1 / when=1: 확정 캔들)
+        const kc5  = calculateKeltnerChannel(data, 5,  14, 1, 1);
+        const kc15 = calculateKeltnerChannel(data, 15, 14, 1, 1);
+        const kc25 = calculateKeltnerChannel(data, 25, 14, 1, 1);
 
-        const prices = [lips_8, teeth_13, jaw_21];
-        if (this.positionType === 'long') {
-            prices.sort((a, b) => b - a);
-        } else {
-            prices.sort((a, b) => a - b);
-        }
-
-        this.exit_price_1 = prices[0];
-        this.exit_price_2 = prices[1];
-        this.exit_price_3 = prices[2];
+        // KC 3개 값을 크기순 정렬: slot0=가장 가까운 → slot2=가장 먼
+        const sorted = this.sortKcLines([kc5, kc15, kc25]);
+        this.exit_price_1 = sorted[0];
+        this.exit_price_2 = sorted[1];
+        this.exit_price_3 = sorted[2];
 
         const side = this.positionType === 'long' ? 'Sell' : 'Buy';
         const triggerDirection = this.positionType === 'long' ? '2' : '1'; // 2:Fall, 1:Rise
@@ -187,88 +182,76 @@ export default class algo3 {
             `${this.name} create atr_stop`, 60000
         );
 
-        // Alligator 1차 익절
-        const exit1Params = {
-            category: 'linear',
-            symbol: this.symbol,
-            side,
-            qty: this.exit_size_1.toString(),
-            triggerPrice: this.exit_price_1.toString(),
-            triggerDirection,
-            triggerBy: 'MarkPrice',
-            orderType: 'Market',
-            reduceOnly: true,
-            orderLinkId: this.orderId_exit_1,
-            timeInForce: 'GoodTillCancel',
-        };
-        consoleLogger.order(`${this.name} 1차 청산 설정`, exit1Params);
-        runWithTimeout(
-            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit1Params),
-            `${this.name} create exit1`, 60000
-        );
+        // KC 익절 주문
+        this.createExitOrders();
+    }
 
-        // Alligator 2차 익절
-        const exit2Params = {
-            category: 'linear',
-            symbol: this.symbol,
-            side,
-            qty: this.exit_size_2.toString(),
-            triggerPrice: this.exit_price_2.toString(),
-            triggerDirection,
-            triggerBy: 'MarkPrice',
-            orderType: 'Market',
-            reduceOnly: true,
-            orderLinkId: this.orderId_exit_2,
-            timeInForce: 'GoodTillCancel',
-        };
-        consoleLogger.order(`${this.name} 2차 청산 설정`, exit2Params);
-        runWithTimeout(
-            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit2Params),
-            `${this.name} create exit2`, 60000
-        );
+    createExitOrders() {
+        const side = this.positionType === 'long' ? 'Sell' : 'Buy';
+        const triggerDirection = this.positionType === 'long' ? '2' : '1';
 
-        // Alligator 3차 익절
-        const exit3Params = {
-            category: 'linear',
-            symbol: this.symbol,
-            side,
-            qty: this.exit_size_3.toString(),
-            triggerPrice: this.exit_price_3.toString(),
-            triggerDirection,
-            triggerBy: 'MarkPrice',
-            orderType: 'Market',
-            reduceOnly: true,
-            orderLinkId: this.orderId_exit_3,
-            timeInForce: 'GoodTillCancel',
-        };
-        consoleLogger.order(`${this.name} 3차 청산 설정`, exit3Params);
-        runWithTimeout(
-            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', exit3Params),
-            `${this.name} create exit3`, 60000
-        );
+        for (const [orderId, qty, triggerPrice] of [
+            [this.orderId_exit_1, this.exit_size_1, this.exit_price_1],
+            [this.orderId_exit_2, this.exit_size_2, this.exit_price_2],
+            [this.orderId_exit_3, this.exit_size_3, this.exit_price_3],
+        ]) {
+            if (qty <= 0) continue;
+            const params = {
+                category: 'linear',
+                symbol: this.symbol,
+                side,
+                qty: qty.toString(),
+                triggerPrice: triggerPrice.toString(),
+                triggerDirection,
+                triggerBy: 'MarkPrice',
+                orderType: 'Market',
+                reduceOnly: true,
+                orderLinkId: orderId,
+                timeInForce: 'GoodTillCancel',
+            };
+            consoleLogger.order(`${this.name} exit 주문`, params);
+            runWithTimeout(
+                () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', params),
+                `${this.name} create exit`, 60000
+            );
+        }
     }
 
     async updateStop() {
         const data = await getKline(this.symbol, '240', 200);
-        const alligatorObj = calculateAlligator(data, 0);
 
-        const lips_8   = Math.round(alligatorObj.lips  * this.priceMultiplier) / this.priceMultiplier;
-        const teeth_13 = Math.round(alligatorObj.teeth * this.priceMultiplier) / this.priceMultiplier;
-        const jaw_21   = Math.round(alligatorObj.jaw   * this.priceMultiplier) / this.priceMultiplier;
+        // KC 3개 채널로 청산 가격 갱신 (KC lengths: 5, 15, 25 / ATR period: 14 / multiplier: 1 / when=1: 확정 캔들)
+        const kc5  = calculateKeltnerChannel(data, 5,  14, 1, 1);
+        const kc15 = calculateKeltnerChannel(data, 15, 14, 1, 1);
+        const kc25 = calculateKeltnerChannel(data, 25, 14, 1, 1);
 
-        const prices = [lips_8, teeth_13, jaw_21];
+        // KC 3개 값 크기순 정렬 후, 순위별 트레일링 (유리한 방향으로만 업데이트)
+        const sorted = this.sortKcLines([kc5, kc15, kc25]);
         if (this.positionType === 'long') {
-            prices.sort((a, b) => b - a);
+            // 롱: 올라가기만 함
+            if (sorted[0] > this.exit_price_1) this.exit_price_1 = sorted[0];
+            if (sorted[1] > this.exit_price_2) this.exit_price_2 = sorted[1];
+            if (sorted[2] > this.exit_price_3) this.exit_price_3 = sorted[2];
         } else {
-            prices.sort((a, b) => a - b);
+            // 숏: 내려가기만 함
+            if (sorted[0] < this.exit_price_1) this.exit_price_1 = sorted[0];
+            if (sorted[1] < this.exit_price_2) this.exit_price_2 = sorted[1];
+            if (sorted[2] < this.exit_price_3) this.exit_price_3 = sorted[2];
         }
 
-        this.exit_price_1 = prices[0];
-        this.exit_price_2 = prices[1];
-        this.exit_price_3 = prices[2];
+        // RSI 기반 exit 재설정: exit_count >= 1이고 RSI 임계값 초과 시
+        if (this.exit_count >= 1) {
+            const rsi = calculateRSI(data, 10, 1);
+            const rsiTriggered = this.positionType === 'long' ? rsi > 70 : rsi < 30;
+            if (rsiTriggered) {
+                consoleLogger.info(`${this.name} RSI(${rsi.toFixed(2)}) 임계값 초과 → exit_count 초기화 및 3차 청산 재설정`);
+                this.resetExitOrders();
+                return;
+            }
+        }
 
         // ATR 스탑은 진입 시 고정 → amend 불필요
-        // Alligator 익절만 매 캔들 amend
+        // KC 익절만 매 캔들 amend
         if (this.exit_count < 1) {
             const amend1 = { category: 'linear', symbol: this.symbol, triggerPrice: this.exit_price_1.toString(), orderLinkId: this.orderId_exit_1 };
             consoleLogger.order(`${this.name} 1차 청산 amend`, amend1);
@@ -286,6 +269,33 @@ export default class algo3 {
             consoleLogger.order(`${this.name} 3차 청산 amend`, amend3);
             runWithTimeout(() => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.amend', amend3), `${this.name} amend exit3`, 60000);
         }
+    }
+
+    resetExitOrders() {
+        // 이미 체결된 수량 계산 후 남은 수량 재배분
+        const filledSize = [this.exit_size_1, this.exit_size_2, this.exit_size_3]
+            .slice(0, this.exit_count)
+            .reduce((a, b) => a + b, 0);
+        const remainingSize = Math.round((this.orderSize - filledSize) * this.qtyMultiplier) / this.qtyMultiplier;
+
+        // 미체결 exit 주문 취소
+        const toCancel = [];
+        if (this.exit_count < 1) toCancel.push(this.orderId_exit_1);
+        if (this.exit_count < 2) toCancel.push(this.orderId_exit_2);
+        if (this.exit_count < 3) toCancel.push(this.orderId_exit_3);
+        this.cancelOrders(toCancel);
+
+        // exit_count 초기화 + 새 주문 ID
+        this.exit_count = 0;
+        this.setNewExitOrderId();
+
+        // 남은 수량 3등분
+        this.exit_size_1 = Math.round((remainingSize / 3) * this.qtyMultiplier) / this.qtyMultiplier;
+        this.exit_size_2 = Math.round((remainingSize / 3) * this.qtyMultiplier) / this.qtyMultiplier;
+        this.exit_size_3 = Math.round((remainingSize - this.exit_size_1 - this.exit_size_2) * this.qtyMultiplier) / this.qtyMultiplier;
+
+        this.createExitOrders();
+        setTradeStatus(this.getTradeStatusDocId(), this.getState());
     }
 
     async orderEventHandle(dataObj) {
@@ -308,7 +318,7 @@ export default class algo3 {
         }
 
         if (dataObj.orderLinkId === this.orderId_atr_stop) {
-            // ATR 스탑 체결 → 전량 청산됨 → 남은 alligator 주문 취소
+            // ATR 스탑 체결 → 전량 청산됨 → 남은 KC 주문 취소
             await this.accountStatus.addPnl(dataObj?.closedPnl);
             this.cancelOrders([this.orderId_exit_1, this.orderId_exit_2, this.orderId_exit_3]);
             this.reset();
@@ -343,7 +353,7 @@ export default class algo3 {
     cancelOrders(orderLinkIds) {
         for (const orderLinkId of orderLinkIds) {
             if (!orderLinkId) continue;
-            // ATR stop / alligator exits 모두 trigger 주문 → orderFilter: 'StopOrder' 필수
+            // ATR stop / KC exits 모두 trigger 주문 → orderFilter: 'StopOrder' 필수
             const params = { category: 'linear', symbol: this.symbol, orderLinkId, orderFilter: 'StopOrder' };
             runWithTimeout(
                 () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.cancel', params),
@@ -381,9 +391,27 @@ export default class algo3 {
         const ts = new Date().getTime();
         this.orderId_open     = `${this.name}_open_${ts}`;
         this.orderId_atr_stop = `${this.name}_atr_stop_${ts}`;
-        this.orderId_exit_1   = `${this.name}_exit1_${ts}`;
-        this.orderId_exit_2   = `${this.name}_exit2_${ts}`;
-        this.orderId_exit_3   = `${this.name}_exit3_${ts}`;
+        this.setNewExitOrderId(ts);
+    }
+
+    setNewExitOrderId(ts = new Date().getTime()) {
+        this.orderId_exit_1 = `${this.name}_exit1_${ts}`;
+        this.orderId_exit_2 = `${this.name}_exit2_${ts}`;
+        this.orderId_exit_3 = `${this.name}_exit3_${ts}`;
+    }
+
+    // KC 값 추출 → 크기순 정렬 (롱: 내림차순=가까운 먼저, 숏: 오름차순=가까운 먼저)
+    sortKcLines(kcArray) {
+        const lines = kcArray.map(kc => {
+            const val = this.positionType === 'long' ? kc.lower : kc.upper;
+            return Math.round(val * this.priceMultiplier) / this.priceMultiplier;
+        });
+        if (this.positionType === 'long') {
+            lines.sort((a, b) => b - a);
+        } else {
+            lines.sort((a, b) => a - b);
+        }
+        return lines;
     }
 
     calculatePositionSize(entry_price, atr, allocated) {

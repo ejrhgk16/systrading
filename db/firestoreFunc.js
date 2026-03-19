@@ -66,4 +66,36 @@ async function addTradeLog(parentDocId, data) {
     }
 }
 
-export { getTradeStatus, setTradeStatus, addTradeLog };
+/**
+ * 하위 컬렉션 문서 조회
+ * 경로: trade_status/{parentDocId}/{subCollection}/{subDocId}
+ */
+async function getSubDoc(parentDocId, subCollection, subDocId) {
+    try {
+        const snap = await getDoc(doc(db, 'trade_status', parentDocId, subCollection, subDocId));
+        if (snap.exists()) {
+            return snap.data();
+        } else {
+            return null;
+        }
+    } catch (e) {
+        consoleLogger.error('Error getting sub document:', e);
+    }
+}
+
+/**
+ * 하위 컬렉션 문서 저장
+ * 경로: trade_status/{parentDocId}/{subCollection}/{subDocId}
+ */
+async function setSubDoc(parentDocId, subCollection, subDocId, data, merge = true) {
+    try {
+        const docRef = doc(db, 'trade_status', parentDocId, subCollection, subDocId);
+        await setDoc(docRef, data, { merge });
+        return true;
+    } catch (e) {
+        consoleLogger.error('Error setting sub document:', e);
+        return false;
+    }
+}
+
+export { getTradeStatus, setTradeStatus, addTradeLog, getSubDoc, setSubDoc };

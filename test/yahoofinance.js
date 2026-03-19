@@ -14,28 +14,30 @@ const main23 = async () => {
   };
 
   try {
-    const results = await yahooFinance.historical('^SPX', queryOptions);
-    console.log(`Fetched ${results.length} days of data from Yahoo Finance.`);
+    const result = await yahooFinance.chart('^SPX', queryOptions);
+    const quotes = result.quotes.filter(r => r.close !== null);
+    console.log(quotes);
+    console.log(`Fetched ${quotes.length} days of data from Yahoo Finance.`);
 
     // indicatior 함수들이 요구하는 배열 형식으로 데이터를 변환합니다.
     // [timestamp, open, high, low, close, volume]
-    const candles = results.map(r => [
-      r.date.getTime(),
+    const candles = quotes.map(r => [
+      new Date(r.date).getTime(),
       r.open,
       r.high,
       r.low,
-      r.close,
+      r.close ?? r.open,
       r.volume
     ]);
 
     // RSI 계산 (14일 기준, 현재 값)
-    const rsi = calculateRSI(candles, 14, 0);
+    const rsi = calculateRSI(candles, 3, 0);
     console.log('Calculated RSI:', rsi);
 
     // 텔레그램으로 보낼 메시지 구성
     const dataToSend = {
       symbol: '^SPX',
-      latest_close: results[results.length - 1].close,
+      latest_close: quotes[quotes.length - 1].close,
       rsi: rsi
     };
 

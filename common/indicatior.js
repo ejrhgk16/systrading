@@ -317,7 +317,7 @@ export function calculateKeltnerChannel(candles, period = 20, atrPeriod = 10, mu
       return null;
     }
 
-    // 2. ATR 계산 (EMA of True Range)
+    // 2. ATR 계산 (Wilder's RMA = 1/n 스무딩)
     let trueRanges = [];
     for (let i = 1; i < candles.length; i++) {
       const c = candles[i];
@@ -336,7 +336,7 @@ export function calculateKeltnerChannel(candles, period = 20, atrPeriod = 10, mu
     }
 
     let atrValues = [];
-    const atrMultiplier = 2 / (atrPeriod + 1);
+    const atrMultiplier = 1 / atrPeriod; // Wilder's RMA
 
     // 첫 ATR 값은 ATR 기간 동안의 True Range의 단순 평균(SMA)입니다.
     let firstAtrSum = 0;
@@ -345,7 +345,7 @@ export function calculateKeltnerChannel(candles, period = 20, atrPeriod = 10, mu
     }
     atrValues[atrPeriod - 1] = firstAtrSum / atrPeriod;
 
-    // 이후 ATR 값들은 표준 EMA 공식을 사용하여 계산합니다.
+    // 이후 ATR 값들은 Wilder's RMA 공식을 사용하여 계산합니다.
     for (let i = atrPeriod; i < trueRanges.length; i++) {
       atrValues[i] = (trueRanges[i] - atrValues[i - 1]) * atrMultiplier + atrValues[i - 1];
     }
