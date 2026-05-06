@@ -9,3 +9,6 @@
 
 # Claude
 .claude/
+
+.opencode/
+AGENTS.md

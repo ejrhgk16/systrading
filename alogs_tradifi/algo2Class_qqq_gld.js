@@ -52,9 +52,13 @@ export class Algo2QqqGld {
     if (shared) {
       this.lastRebalIsoWeek = shared.last_rebal_iso_week ?? null;
       this.lastSignals = shared.last_signals ?? null;
+      this.pendingActions = this._normalizePendingActions(shared.pending_actions ?? []);
     }
 
     const initialized = this.tranches.length === 4;
+    if (this.pendingActions.length > 0) {
+      consoleLogger.info(`${this.name} pendingActions ${this.pendingActions.length}건 복원됨`);
+    }
     consoleLogger.info(`${this.name} 초기 설정 완료. ${initialized ? '트렌치 복원됨' : 'init 필요'}`);
   }
 
@@ -143,6 +147,69 @@ export class Algo2QqqGld {
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   }
 
+  _normalizePendingActions(actions = []) {
+    if (!Array.isArray(actions)) return [];
+
+    return actions
+      .filter((action) =>
+        action &&
+        Number.isFinite(action.tranche_num) &&
+        typeof action.ticker === 'string' &&
+        (action.action === 'buy' || action.action === 'sell') &&
+        Number.isFinite(action.shares) &&
+        action.shares > 0 &&
+        Number.isFinite(action.price) &&
+        action.price > 0 &&
+        typeof action.reason === 'string'
+      )
+      .map((action) => ({
+        tranche_num: Number(action.tranche_num),
+        ticker: action.ticker,
+        action: action.action,
+        shares: Number(action.shares),
+        price: Number(action.price),
+        reason: action.reason,
+      }));
+  }
+
+  _setPendingActions(actions) {
+    this.pendingActions = this._normalizePendingActions(actions);
+    return this.pendingActions;
+  }
+
+  _isSamePendingAction(left, right) {
+    const target = right?._original ?? right;
+    if (!left || !target) return false;
+
+    return left.tranche_num === target.tranche_num &&
+      left.ticker === target.ticker &&
+      left.action === target.action &&
+      left.shares === target.shares &&
+      left.price === target.price &&
+      left.reason === target.reason;
+  }
+
+  async _savePendingActions() {
+    await setTradeStatus('qqq_gld', {
+      pending_actions: this._normalizePendingActions(this.pendingActions),
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  async clearPendingActions() {
+    this.pendingActions = [];
+    await this._savePendingActions();
+  }
+
+  async removePendingAction(action) {
+    const before = this.pendingActions.length;
+    this.pendingActions = this.pendingActions.filter((pending) => !this._isSamePendingAction(pending, action));
+
+    if (this.pendingActions.length !== before) {
+      await this._savePendingActions();
+    }
+  }
+
   /**
    * 오늘 해야 할 매매 액션 리스트 생성
    */
@@ -167,8 +234,7 @@ export class Algo2QqqGld {
           });
         }
       }
-      this.pendingActions = actions;
-      return actions;
+      return this._setPendingActions(actions);
     }
 
     // [2] VIX 백워데이션: 모든 트렌치 QQQ_LV만 청산
@@ -232,8 +298,7 @@ export class Algo2QqqGld {
       }
     }
 
-    this.pendingActions = actions;
-    return actions;
+    return this._setPendingActions(actions);
   }
 
   _calcRebalanceActions(tranche, qqqLvPrice, gldLvPrice, holdQqqLv, holdGldLv) {
@@ -350,6 +415,7 @@ export class Algo2QqqGld {
         gld_lv_price: indicators.gld_lv_price,
         date: indicators.date,
       },
+      pending_actions: this._normalizePendingActions(this.pendingActions),
       updated_at: new Date().toISOString(),
     };
     await setTradeStatus('qqq_gld', shared);
@@ -358,17 +424,12 @@ export class Algo2QqqGld {
     this.lastSignals = shared.last_signals;
   }
 
-  // ─── CLI 커맨드 ──────────────────────────────────────────────
+  // ─── CLI 커맨드 (command.js에서 호출) ───────────────────────
 
-  handleCommand(subCmd, args) {
-    if (subCmd === 'status') return this._cmdStatus(args);
-    if (subCmd === 'pending') return this._cmdPending();
-    if (subCmd === 'confirm') return this._cmdConfirm();
-    if (subCmd === 'init') return this._cmdInit();
-    if (subCmd === 'add') return this._cmdAdd();
-    if (subCmd === 'sub') return this._cmdSub();
-    if (subCmd === 'run') return this._cmdRun();
-    return `알 수 없는 커맨드: ${subCmd}\n사용법: ta2 [status|pending|confirm|init|add|sub|run]`;
+  /** ta status 용 한 줄 요약 */
+  getStatusSummary() {
+    const totalEquity = this.tranches.reduce((s, t) => s + t.equity, 0);
+    return `  총자산: $${totalEquity.toFixed(0)}, 트렌치 ${this.tranches.length}개\n`;
   }
 
   _cmdStatus(args) {
@@ -387,64 +448,22 @@ export class Algo2QqqGld {
       totalEquity += t.equity;
       result += `  트렌치#${t.tranche_num}: $${t.equity.toFixed(0)} (${TICKER_QQQ_LV} ${t.shares[TICKER_QQQ_LV]}주 + ${TICKER_GLD_LV} ${t.shares[TICKER_GLD_LV]}주 + 현금 $${t.cash.toFixed(0)})\n`;
     }
-    result += `  합계: $${totalEquity.toFixed(0)}`;
+    result += `  합계: $${totalEquity.toFixed(0)}\n`;
+
     if (this.lastSignals) {
-      result += `\n  최근 시그널: ${this.lastSignals.date}`;
+      const s = this.lastSignals;
+      const vixStr = s.is_backwardation ? '백워데이션 (VIX > VIX3M)' : '콘탱고 (VIX < VIX3M)';
+      const tipStatus = s.tip_avg_ret < 0 ? '위험' : '정상';
+      const qqqStatus = s.qqq_mom_avg < 0 ? '미보유' : '보유';
+      const gldStatus = s.gld_mom_avg < 0 ? '미보유' : '보유';
+      result += `\n시그널 (${s.date}):\n`;
+      result += `  VIX 구조: ${vixStr}\n`;
+      result += `  TIP: ${(s.tip_avg_ret * 100).toFixed(1)}% (${tipStatus})\n`;
+      result += `  QQQ: ${(s.qqq_mom_avg * 100).toFixed(1)}% (${qqqStatus})\n`;
+      result += `  GLD: ${(s.gld_mom_avg * 100).toFixed(1)}% (${gldStatus})\n`;
+      result += `  ${TICKER_QQQ_LV}: $${s.qqq_lv_price?.toFixed(2)}, ${TICKER_GLD_LV}: $${s.gld_lv_price?.toFixed(2)}\n`;
     }
     return result;
-  }
-
-  _cmdPending() {
-    if (this.pendingActions.length === 0) return '대기 액션 없음';
-    let result = '=== 대기 액션 ===\n';
-    this.pendingActions.forEach((a, i) => {
-      const actionKr = a.action === 'buy' ? '매수' : '매도';
-      result += `  #${i + 1} [트렌치#${a.tranche_num}] ${a.ticker} ${actionKr} ${a.shares}주 @ ~$${a.price.toFixed(2)} (${a.reason})\n`;
-    });
-    return result;
-  }
-
-  /** 체결 확인 — 서브 프롬프트 */
-  _cmdConfirm() {
-    if (this.pendingActions.length === 0) return '대기 액션 없음';
-
-    let prompt = '=== 대기 액션 ===\n';
-    this.pendingActions.forEach((a, i) => {
-      const actionKr = a.action === 'buy' ? '매수' : '매도';
-      prompt += `  #${i + 1} [트렌치#${a.tranche_num}] ${a.ticker} ${actionKr} ${a.shares}주 @ ~$${a.price.toFixed(2)} (${a.reason})\n`;
-    });
-    prompt += '\n번호 체결가 또는 all 입력 (예: 1 79.50 또는 all)';
-
-    return {
-      prompt,
-      handler: async (input) => {
-        const trimmed = input.trim();
-
-        if (trimmed === 'all') {
-          const results = [];
-          for (const a of [...this.pendingActions]) {
-            results.push(await this._applyAction(a, a.price));
-          }
-          this.pendingActions = [];
-          results.push(`\n=== 전체 ${results.length}건 반영 완료 ===`);
-          return results.join('\n');
-        }
-
-        const parts = trimmed.split(/\s+/);
-        const idx = parseInt(parts[0]) - 1;
-        if (isNaN(idx) || idx < 0 || idx >= this.pendingActions.length) {
-          return `번호 입력 (1~${this.pendingActions.length})`;
-        }
-
-        const action = this.pendingActions[idx];
-        const price = parts[1] ? parseFloat(parts[1]) : action.price;
-        if (isNaN(price) || price <= 0) return '체결가 입력 필요 (예: 1 79.50)';
-
-        const result = await this._applyAction(action, price);
-        this.pendingActions.splice(idx, 1);
-        return result + `\n남은 대기: ${this.pendingActions.length}건`;
-      },
-    };
   }
 
   /** 초기 포트폴리오 세팅 — 서브 프롬프트 */
@@ -489,6 +508,7 @@ export class Algo2QqqGld {
         }
 
         const totalEquity = this.tranches.reduce((s, t) => s + t.equity, 0);
+        await this.clearPendingActions();
         let msg = `=== 초기 세팅 완료 ===\n`;
         msg += results.join('\n');
         msg += `\n  합계: $${totalEquity.toFixed(0)}`;
@@ -519,6 +539,7 @@ export class Algo2QqqGld {
 
         let msg = `=== 현금 $${amount.toFixed(0)} 추가 완료 (트렌치당 $${perTranche.toFixed(0)}) ===\n`;
         msg += results.join('\n');
+        await this.clearPendingActions();
         consoleLogger.info(`${this.name} add $${amount} 완료`);
         return msg;
       },
@@ -534,6 +555,29 @@ export class Algo2QqqGld {
     consoleLogger.info(`${this.name} 강제 실행: lastRebalIsoWeek ${before} → null, 트렌치#${targetTranche} 리밸런싱 대상`);
     await this.scheduleFunc();
     return `강제 실행 완료 (W${isoWeek}, 트렌치#${targetTranche})`;
+  }
+
+  /** 현재 상태 기준 pending 재계산 + 저장 */
+  async _cmdCheck() {
+    if (this.tranches.length !== 4) return 'init 먼저 실행';
+
+    const indicators = await this.fetchIndicators();
+    const actions = this.determineActions(indicators);
+
+    for (const t of this.tranches) {
+      t.updateEquity(indicators.qqq_lv_price, indicators.gld_lv_price);
+    }
+
+    await this.saveState(indicators);
+
+    let msg = `pending 체크 완료 (${indicators.date})`;
+    if (actions.length === 0) return `${msg}\n대기 액션 없음`;
+
+    for (const action of actions) {
+      const actionKr = action.action === 'buy' ? '매수' : '매도';
+      msg += `\n  [트렌치#${action.tranche_num}] ${action.ticker} ${actionKr} ${action.shares}주 @ ~$${action.price.toFixed(2)} (${action.reason})`;
+    }
+    return msg;
   }
 
   /** 현금 인출 — 서브 프롬프트 */
@@ -563,6 +607,7 @@ export class Algo2QqqGld {
 
         let msg = `=== 현금 $${amount.toFixed(0)} 인출 완료 (트렌치당 $${perTranche.toFixed(0)}) ===\n`;
         msg += results.join('\n');
+        await this.clearPendingActions();
         consoleLogger.info(`${this.name} sub $${amount} 완료`);
         return msg;
       },
@@ -574,18 +619,16 @@ export class Algo2QqqGld {
     const t = this.tranches.find(tr => tr.tranche_num === action.tranche_num);
     if (!t) return `트렌치 #${action.tranche_num} 없음`;
 
-    const beforeShares = t.shares[action.ticker];
     const beforeCash = t.cash;
+    const beforeAvgPrice = t.avg_price[action.ticker];
 
     let pnl = 0;
     if (action.action === 'buy') {
       t.buy(action.ticker, action.shares, price);
     } else {
-      pnl = (price - t.avg_price[action.ticker]) * action.shares;
+      pnl = (price - beforeAvgPrice) * action.shares;
       t.sell(action.ticker, action.shares, price);
     }
-
-    const afterShares = t.shares[action.ticker];
     const qqqLvP = this.lastSignals?.qqq_lv_price || price;
     const gldLvP = this.lastSignals?.gld_lv_price || price;
     t.updateEquity(qqqLvP, gldLvP);
@@ -596,10 +639,15 @@ export class Algo2QqqGld {
       shares: action.shares, price, reason: action.reason,
       tranche_num: action.tranche_num, pnl,
     });
+    await this.removePendingAction(action);
 
-    const actionKr = action.action === 'buy' ? '매수' : '매도';
-    const pnlStr = action.action === 'sell' ? `, PnL: $${pnl.toFixed(2)}` : '';
-    const result = `[반영완료] 트렌치#${action.tranche_num} ${action.ticker} ${actionKr} ${action.shares}주 @ $${price.toFixed(2)} (${beforeShares}→${afterShares}주, 현금 $${beforeCash.toFixed(0)}→$${t.cash.toFixed(0)}${pnlStr})`;
+    let result;
+    if (action.action === 'sell') {
+      const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+      result = `[청산완료] 트렌치#${action.tranche_num} ${action.ticker} ${action.shares}주 | 평단 $${beforeAvgPrice.toFixed(2)} → 체결 $${price.toFixed(2)} | 실현손익 ${pnlStr} | 현금 $${t.cash.toFixed(0)}`;
+    } else {
+      result = `[매수완료] 트렌치#${action.tranche_num} ${action.ticker} ${action.shares}주 @ $${price.toFixed(2)} | 현금 $${beforeCash.toFixed(0)}→$${t.cash.toFixed(0)}`;
+    }
     consoleLogger.info(`${this.name} ${result}`);
     return result;
   }

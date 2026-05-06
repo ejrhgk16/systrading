@@ -87,8 +87,8 @@ export default class algo2{
         const data = await getKline(this.symbol, '240', 200)
         
         const latestCandle = data[data.length - 1];
-        const current_open = latestCandle[1];
- 
+        const current_open = parseFloat(latestCandle[1]);
+
         const bbObj =  calculateBB(data, 20, this.std, 1);//직전봉
 
         const adxObj = calculateDMI(data, 14, 1);//직전봉
@@ -558,7 +558,7 @@ export default class algo2{
         const data = await getKline(this.symbol, '240', 200)
 
         const latestCandle = data[data.length - 1];
-        const current_open = latestCandle[4];
+        const current_open = parseFloat(latestCandle[4]);
 
         const rawOrderSize = this.capital / current_open; 
         this.orderSize = Math.round(rawOrderSize * this.qtyMultiplier) / this.qtyMultiplier;

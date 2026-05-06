@@ -339,9 +339,11 @@ export const runWithTimeout = (taskFn, label, timeoutMs = CRON_JOB_TIMEOUT_MS) =
 
 export const scheduleWithWatchdog = (expression, taskFn) => {
   const task = cron.schedule(expression, taskFn, { timezone: 'UTC' });
+  consoleLogger.info(`[CRON] 등록완료: ${expression} | nextRun: ${task.getNextRun()} | status: ${task.getStatus()}`);
   task.on('execution:missed', () => {
     consoleLogger.warn('[MISSED] 크론 누락 → 즉시 재실행');
     fileLogger.warn('[MISSED] 크론 누락 → 즉시 재실행');
     task.execute();
   });
+  return task;
 };

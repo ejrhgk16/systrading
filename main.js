@@ -7,6 +7,7 @@ import Algo3AccountStatus from './account/algo3AccountStatus.js';
 import { fileLogger, consoleLogger } from './common/logger.js';
 import { getSpxVixData } from './alogs_tradifi/algo1Class_spx_vix.js';
 import { Algo2QqqGld } from './alogs_tradifi/algo2Class_qqq_gld.js';
+import { Algo3MeanReversionQqq } from './alogs_tradifi/algo3Class_mean_reversion_qqq.js';
 import { runWithTimeout, scheduleWithWatchdog, CRON_JOB_TIMEOUT_MS } from './common/util.js';
 import { initCLI } from './common/cli.js';
 
@@ -22,6 +23,7 @@ const algo3Objs = algo3Symbols.reduce((acc, symbol) => {
 }, {});
 
 const qqgGldAlgo = new Algo2QqqGld();
+const meanRevAlgo = new Algo3MeanReversionQqq();
 
 
 async function main() {
@@ -40,25 +42,31 @@ async function main() {
   await algo3AccountStatus.load();
   await Promise.all(Object.values(algo3Objs).map(obj => obj.set()));
   await qqgGldAlgo.set();
+  await meanRevAlgo.set();
 
-  scheduleWithWatchdog('1 0 */4 * * *', () =>
+  const cronTask4h = scheduleWithWatchdog('1 0 */4 * * *', () =>
     runWithTimeout(
       () => Promise.all(Object.values(algo3Objs).map(obj => obj.scheduleFunc())),
       '4시간 캔들용 작업'
     )
   );
 
-  // scheduleWithWatchdog('30 21 * * *', () =>
-  //   runWithTimeout(() => getSpxVixData(), 'getSpxVixData 작업')
-  // );
-
   // QQQ+GLD 트렌치 전략: 매일 UTC 22:00 (미국장 마감 후)
-  scheduleWithWatchdog('30 21 * * *', () =>
-    runWithTimeout(() => qqgGldAlgo.scheduleFunc(), 'QQQ+GLD 트렌치', CRON_JOB_TIMEOUT_MS)
+  const cronTaskDaily = scheduleWithWatchdog('30 21 * * *', () =>
+    runWithTimeout(
+      () => Promise.all([qqgGldAlgo.scheduleFunc(), meanRevAlgo.scheduleFunc()]),
+      'Tradifi 일일 전략',
+      CRON_JOB_TIMEOUT_MS
+    )
   );
 
-  // CLI 초기화 (ta2=tradifi algo2, qg=QQQ+GLD 단축어)
-  initCLI({ ta2: qqgGldAlgo, qg: qqgGldAlgo });
+  const cronTasks = { '4h': cronTask4h, 'daily': cronTaskDaily };
+
+  const strategyMap = {
+    tradifi: { ta2: qqgGldAlgo, ta3: meanRevAlgo },
+    crypto:  { ca3: algo3Objs },
+  };
+  initCLI(strategyMap, cronTasks);
 
   ws_client.subscribeV5('order', 'linear');
   await ws_client.connectWSAPI();

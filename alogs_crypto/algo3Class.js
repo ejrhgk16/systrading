@@ -73,7 +73,7 @@ export default class algo3 {
         const data = await getKline(this.symbol, '240', 200);
 
         const latestCandle = data[data.length - 1];
-        const current_open = latestCandle[1];
+        const current_open = parseFloat(latestCandle[1]);
 
         const bbObj   = calculateBB(data, 20, this.std, 1);
         const adxObj  = calculateDMI(data, 14, 1);
@@ -430,6 +430,160 @@ export default class algo3 {
     getState() {
         const { accountStatus, ...state } = this;
         return state;
+    }
+
+    getStatus() {
+        return `${this.name} | pos: ${this.positionType || 'none'} | filled: ${this.isOpenOrderFilled} | exit_count: ${this.exit_count}\n`
+            + `  orderSize: ${this.orderSize}, openPrice: ${this.openPrice}\n`
+            + `  atr_stop: ${this.atr_stop_price} (id: ${this.orderId_atr_stop})\n`
+            + `  exit1: price=${this.exit_price_1}, qty=${this.exit_size_1} (id: ${this.orderId_exit_1})\n`
+            + `  exit2: price=${this.exit_price_2}, qty=${this.exit_size_2} (id: ${this.orderId_exit_2})\n`
+            + `  exit3: price=${this.exit_price_3}, qty=${this.exit_size_3} (id: ${this.orderId_exit_3})`;
+    }
+
+    async setStop(type, qty, price) {
+        if (!this.isOpenOrderFilled || !this.positionType) {
+            return '포지션이 없습니다.';
+        }
+
+        const side = this.positionType === 'long' ? 'Sell' : 'Buy';
+        const triggerDirection = this.positionType === 'long' ? '2' : '1';
+        const ts = new Date().getTime();
+
+        const fieldMap = {
+            atr_stop:  { priceField: 'atr_stop_price', qtyField: null,         orderIdField: 'orderId_atr_stop' },
+            exit1:     { priceField: 'exit_price_1',    qtyField: 'exit_size_1', orderIdField: 'orderId_exit_1' },
+            exit2:     { priceField: 'exit_price_2',    qtyField: 'exit_size_2', orderIdField: 'orderId_exit_2' },
+            exit3:     { priceField: 'exit_price_3',    qtyField: 'exit_size_3', orderIdField: 'orderId_exit_3' },
+        };
+
+        const field = fieldMap[type];
+        if (!field) return `알 수 없는 stop 종류: ${type}. (atr_stop, exit1, exit2, exit3)`;
+
+        // 기존 주문 취소
+        const oldOrderId = this[field.orderIdField];
+        if (oldOrderId) {
+            this.cancelOrders([oldOrderId]);
+        }
+
+        // 메모리 업데이트
+        this[field.priceField] = price;
+        if (field.qtyField) this[field.qtyField] = qty;
+        if (type === 'atr_stop') this.orderSize = qty;
+
+        const newOrderId = `${this.name}_${type}_${ts}`;
+        this[field.orderIdField] = newOrderId;
+
+        // 거래소 주문
+        const params = {
+            category: 'linear',
+            symbol: this.symbol,
+            side,
+            qty: qty.toString(),
+            triggerPrice: price.toString(),
+            triggerDirection,
+            triggerBy: 'MarkPrice',
+            orderType: 'Market',
+            reduceOnly: true,
+            orderLinkId: newOrderId,
+            timeInForce: 'GoodTillCancel',
+        };
+        consoleLogger.order(`${this.name} CLI setstop ${type}`, params);
+        await runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', params),
+            `${this.name} CLI setstop ${type}`, 60000
+        );
+
+        // Firestore 저장
+        await setTradeStatus(this.getTradeStatusDocId(), this.getState());
+
+        return `=== ${this.symbol} ${type} 설정 완료 (qty: ${qty}, price: ${price}) ===`;
+    }
+
+    async setStop2(side) {
+        if (!this.isOpenOrderFilled || !this.positionType) {
+            return '포지션이 없습니다.';
+        }
+
+        this.positionType = side;
+
+        const data = await getKline(this.symbol, '240', 200);
+        const latestCandle = data[data.length - 1];
+        const currentPrice = parseFloat(latestCandle[4]);
+        const atr = calculateATR(data, 14, 1);
+
+        // 남은 수량 계산 후 3등분
+        const filledSize = [this.exit_size_1, this.exit_size_2, this.exit_size_3]
+            .slice(0, this.exit_count)
+            .reduce((a, b) => a + b, 0);
+        const remainingSize = Math.round((this.orderSize - filledSize) * this.qtyMultiplier) / this.qtyMultiplier;
+        const newExitSize1 = Math.round((remainingSize / 3) * this.qtyMultiplier) / this.qtyMultiplier;
+        const newExitSize2 = Math.round((remainingSize / 3) * this.qtyMultiplier) / this.qtyMultiplier;
+        const newExitSize3 = Math.round((remainingSize - newExitSize1 - newExitSize2) * this.qtyMultiplier) / this.qtyMultiplier;
+
+        this.exit_size_1 = newExitSize1;
+        this.exit_size_2 = newExitSize2;
+        this.exit_size_3 = newExitSize3;
+        this.exit_count = 0;
+
+        // ATR 스탑 가격 계산
+        if (side === 'long') {
+            this.atr_stop_price = Math.round((currentPrice - atr * this.atr_multiplier) * this.priceMultiplier) / this.priceMultiplier;
+        } else {
+            this.atr_stop_price = Math.round((currentPrice + atr * this.atr_multiplier) * this.priceMultiplier) / this.priceMultiplier;
+        }
+
+        // KC 익절 가격 계산
+        const kc5  = calculateKeltnerChannel(data, 5,  14, 1, 1);
+        const kc15 = calculateKeltnerChannel(data, 15, 14, 1, 1);
+        const kc25 = calculateKeltnerChannel(data, 25, 14, 1, 1);
+        const sorted = this.sortKcLines([kc5, kc15, kc25]);
+        this.exit_price_1 = sorted[0];
+        this.exit_price_2 = sorted[1];
+        this.exit_price_3 = sorted[2];
+
+        // 기존 stop 주문 취소
+        this.cancelOrders([this.orderId_atr_stop, this.orderId_exit_1, this.orderId_exit_2, this.orderId_exit_3]);
+
+        // 새 주문 ID 생성
+        const ts = new Date().getTime();
+        this.orderId_atr_stop = `${this.name}_atr_stop_${ts}`;
+        this.setNewExitOrderId(ts);
+
+        const triggerDirection = side === 'long' ? '2' : '1';
+        const stopSide = side === 'long' ? 'Sell' : 'Buy';
+
+        // ATR 스탑 주문 (remainingSize로 전량 커버)
+        const atrStopParams = {
+            category: 'linear',
+            symbol: this.symbol,
+            side: stopSide,
+            qty: remainingSize.toString(),
+            triggerPrice: this.atr_stop_price.toString(),
+            triggerDirection,
+            triggerBy: 'MarkPrice',
+            orderType: 'Market',
+            reduceOnly: true,
+            orderLinkId: this.orderId_atr_stop,
+            timeInForce: 'GoodTillCancel',
+        };
+        consoleLogger.order(`${this.name} setStop2 ATR 스탑`, atrStopParams);
+        await runWithTimeout(
+            () => ws_client.sendWSAPIRequest(WS_KEY_MAP.v5PrivateTrade, 'order.create', atrStopParams),
+            `${this.name} setStop2 atr_stop`, 60000
+        );
+
+        // KC 익절 주문 (재계산된 exit_size_1/2/3 사용)
+        this.createExitOrders();
+
+        // Firestore 저장
+        await setTradeStatus(this.getTradeStatusDocId(), this.getState());
+
+        return `=== ${this.symbol} setStop2 ${side} 완료 ===
+ATR stop: ${this.atr_stop_price} (qty: ${remainingSize})
+Exit1: ${this.exit_price_1} (qty: ${this.exit_size_1})
+Exit2: ${this.exit_price_2} (qty: ${this.exit_size_2})
+Exit3: ${this.exit_price_3} (qty: ${this.exit_size_3})`;
     }
 
     async scheduleFunc() {
