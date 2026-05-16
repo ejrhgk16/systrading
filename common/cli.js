@@ -1,12 +1,10 @@
 import readline from 'readline';
 import { consoleLogger } from './logger.js';
-import { registerTradifiCommands } from '../alogs_tradifi/command.js';
-import { registerCryptoCommands } from '../alogs_crypto/command.js';
 
 const commands = {};
 let pendingHandler = null;  // 서브 프롬프트 대기 핸들러
 
-function registerCommand(name, handler) {
+export function registerCommand(name, handler) {
   commands[name] = handler;
 }
 
@@ -79,10 +77,6 @@ export function initCLI(strategyMap, cronTasks = {}) {
     }
     return msg;
   });
-
-  // 도메인별 커맨드 등록
-  registerTradifiCommands(registerCommand, strategyMap.tradifi);
-  registerCryptoCommands(registerCommand, strategyMap.crypto);
 
   const rl = readline.createInterface({
     input: process.stdin,

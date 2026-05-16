@@ -1,12 +1,13 @@
+import { registerCommand } from '../common/cli.js';
+
 /**
  * Crypto 커맨드 등록 (ca3)
- * @param {Function} register - cli.js의 registerCommand
  * @param {object} strategies - { ca3: { BTCUSDT: algo3인스턴스, ETHUSDT: algo3인스턴스 } }
  */
-export function registerCryptoCommands(register, strategies) {
+export function registerCryptoCommands(strategies) {
   const ca3Objs = strategies.ca3;
 
-  register('ca3', (subCmd) => {
+  registerCommand('ca3', (subCmd) => {
     if (subCmd === 'status') {
       let msg = '=== algo3 상태 ===\n';
       for (const obj of Object.values(ca3Objs)) {

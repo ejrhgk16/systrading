@@ -1,14 +1,14 @@
 import { fetchTodayOpenPrices, buildNetSummary } from './tradifi_utils.js';
+import { registerCommand } from '../common/cli.js';
 
 /**
  * Tradifi 커맨드 등록 (ta / ta2 / qg / ta3)
- * @param {Function} register - cli.js의 registerCommand
  * @param {object} strategies - { ta2: Algo2QqqGld, ta3: Algo3MeanReversionQqq }
  */
-export function registerTradifiCommands(register, strategies) {
+export function registerTradifiCommands(strategies) {
 
   // ── ta (통합) ─────────────────────────────────────────────────
-  register('ta', (subCmd) => {
+  registerCommand('ta', (subCmd) => {
     if (subCmd === 'status')  return cmdTaStatus(strategies);
     if (subCmd === 'pending') return cmdTaPending(strategies);
     if (subCmd === 'confirm') return cmdTaConfirm(strategies);
@@ -26,12 +26,12 @@ export function registerTradifiCommands(register, strategies) {
     if (subCmd === 'check')  return ta2._cmdCheck();
     return 'ta2 [status|init|add|sub|run|check]';
   };
-  register('ta2', ta2Handler);
-  register('qg',  ta2Handler);
+  registerCommand('ta2', ta2Handler);
+  registerCommand('qg',  ta2Handler);
 
   // ── ta3 (QQQ 역추세 BB) ───────────────────────────────────────
   const ta3 = strategies.ta3;
-  register('ta3', (subCmd) => {
+  registerCommand('ta3', (subCmd) => {
     if (subCmd === 'status') return ta3._cmdStatus();
     if (subCmd === 'init')   return ta3._cmdInit();
     if (subCmd === 'add')    return ta3._cmdAdd();
