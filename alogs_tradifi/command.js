@@ -24,7 +24,8 @@ export function registerTradifiCommands(strategies) {
     if (subCmd === 'sub')    return ta2._cmdSub();
     if (subCmd === 'run')    return ta2._cmdRun();
     if (subCmd === 'check')  return ta2._cmdCheck();
-    return 'ta2 [status|init|add|sub|run|check]';
+    if (subCmd === 'adjust') return ta2._cmdAdjust(args);
+    return 'ta2 [status|init|add|sub|run|check|adjust]';
   };
   registerCommand('ta2', ta2Handler);
   registerCommand('qg',  ta2Handler);

@@ -573,6 +573,60 @@ export class Algo2QqqGld {
     return msg;
   }
 
+  /** 수동 체결 조정 — 서브 프롬프트 */
+  _cmdAdjust() {
+    if (this.tranches.length !== 4) return 'init 먼저 실행';
+    return {
+      prompt: '트렌치번호 ticker(TQQQ/UGL) buy/sell 수량 체결가 순서로 입력',
+      handler: async (input) => {
+        const parts = input.trim().split(/\s+/);
+        if (parts.length < 5) return '입력 부족: <트렌치번호> <ticker> <buy/sell> <수량> <체결가>';
+
+        const { TICKER_QQQ_LV, TICKER_GLD_LV } = Algo2QqqGld;
+        const trancheNum = parseInt(parts[0]);
+        const ticker = parts[1]?.toUpperCase();
+        const action = parts[2];
+        const shares = parseInt(parts[3]);
+        const price = parseFloat(parts[4]);
+
+        if (![1, 2, 3, 4].includes(trancheNum)) return '트렌치 번호 (1~4)';
+        if (ticker !== TICKER_QQQ_LV && ticker !== TICKER_GLD_LV) return `ticker (${TICKER_QQQ_LV}/${TICKER_GLD_LV})`;
+        if (action !== 'buy' && action !== 'sell') return 'action (buy/sell)';
+        if (isNaN(shares) || shares <= 0) return '수량 확인';
+        if (isNaN(price) || price <= 0) return '체결가 확인';
+
+        const t = this.tranches.find(tr => tr.tranche_num === trancheNum);
+        if (!t) return `트렌치 #${trancheNum} 없음`;
+
+        const beforeCash = t.cash;
+        const beforeAvgPrice = t.avg_price[ticker];
+
+        let pnl = 0;
+        if (action === 'buy') {
+          t.buy(ticker, shares, price);
+        } else {
+          if (t.shares[ticker] < shares) return `트렌치#${trancheNum} ${ticker} 보유 부족 (${t.shares[ticker]}주 < ${shares}주)`;
+          pnl = (price - beforeAvgPrice) * shares;
+          t.sell(ticker, shares, price);
+        }
+
+        t.updateEquity(price, price);
+        await setSubDoc('qqq_gld', 'tranches', String(trancheNum), t.toData());
+        await addTradeLog('algo2_qqq_gld', {
+          ticker, action, shares, price,
+          reason: 'manual adjust',
+          tranche_num: trancheNum, pnl,
+        });
+
+        if (action === 'sell') {
+          const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+          return `[조정] 트렌치#${trancheNum} ${ticker} 매도 ${shares}주 | 평단 $${beforeAvgPrice.toFixed(2)} → 체결 $${price.toFixed(2)} | 실현손익 ${pnlStr} | 현금 $${beforeCash.toFixed(0)}→$${t.cash.toFixed(0)}`;
+        }
+        return `[조정] 트렌치#${trancheNum} ${ticker} 매수 ${shares}주 @ $${price.toFixed(2)} | 현금 $${beforeCash.toFixed(0)}→$${t.cash.toFixed(0)}`;
+      },
+    };
+  }
+
   /** 현금 인출 — 서브 프롬프트 */
   _cmdSub() {
     if (this.tranches.length !== 4) return 'init 먼저 실행';

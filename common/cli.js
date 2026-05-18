@@ -44,6 +44,7 @@ export function initCLI(strategyMap, cronTasks = {}) {
     msg += '  ta2 sub                        — 현금 인출\n';
     msg += '  ta2 run                        — 강제 실행\n';
     msg += '  ta2 check                      — pending 강제 체크\n';
+    msg += '  ta2 adjust                     — 트렌치별 수동 체결 조정\n';
     msg += '\n--- QQQ 역추세 BB (ta3) ---\n';
     msg += '  ta3 status                     — 포지션/지표 현황\n';
     msg += '  ta3 init                       — 초기 자본 세팅\n';
