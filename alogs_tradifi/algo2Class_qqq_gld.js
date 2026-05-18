@@ -354,15 +354,12 @@ export class Algo2QqqGld {
       : `콘탱고 (VIX=${vix.toFixed(1)} < VIX3M=${vix3m.toFixed(1)})`;
 
     const tipStatus = tip_avg_ret < 0 ? '위험' : '정상';
-    const qqqStatus = qqq_mom_avg < 0 ? '미보유' : '보유';
-    const gldStatus = gld_mom_avg < 0 ? '미보유' : '보유';
-
     let msg = `*QQQ+GLD 트렌치 시그널* (${date})\n\n`;
     msg += `시그널:\n`;
     msg += `  VIX 구조: ${vixStructure}\n`;
     msg += `  TIP 모멘텀: ${(tip_avg_ret * 100).toFixed(1)}% (${tipStatus})\n`;
-    msg += `  QQQ 모멘텀: ${(qqq_mom_avg * 100).toFixed(1)}% (${qqqStatus})\n`;
-    msg += `  GLD 모멘텀: ${(gld_mom_avg * 100).toFixed(1)}% (${gldStatus})\n\n`;
+    msg += `  QQQ 모멘텀: ${(qqq_mom_avg * 100).toFixed(1)}%\n`;
+    msg += `  GLD 모멘텀: ${(gld_mom_avg * 100).toFixed(1)}%\n\n`;
 
     if (isRebalWeek) {
       msg += `금주 리밸런싱: 트렌치 #${targetTrancheNum} (ISO week ${isoWeek} % 4 = ${isoWeek % 4})\n\n`;
@@ -452,13 +449,11 @@ export class Algo2QqqGld {
       const s = this.lastSignals;
       const vixStr = s.is_backwardation ? '백워데이션 (VIX > VIX3M)' : '콘탱고 (VIX < VIX3M)';
       const tipStatus = s.tip_avg_ret < 0 ? '위험' : '정상';
-      const qqqStatus = s.qqq_mom_avg < 0 ? '미보유' : '보유';
-      const gldStatus = s.gld_mom_avg < 0 ? '미보유' : '보유';
       result += `\n시그널 (${s.date}):\n`;
       result += `  VIX 구조: ${vixStr}\n`;
       result += `  TIP: ${(s.tip_avg_ret * 100).toFixed(1)}% (${tipStatus})\n`;
-      result += `  QQQ: ${(s.qqq_mom_avg * 100).toFixed(1)}% (${qqqStatus})\n`;
-      result += `  GLD: ${(s.gld_mom_avg * 100).toFixed(1)}% (${gldStatus})\n`;
+      result += `  QQQ: ${(s.qqq_mom_avg * 100).toFixed(1)}%\n`;
+      result += `  GLD: ${(s.gld_mom_avg * 100).toFixed(1)}%\n`;
       result += `  ${TICKER_QQQ_LV}: $${s.qqq_lv_price?.toFixed(2)}, ${TICKER_GLD_LV}: $${s.gld_lv_price?.toFixed(2)}\n`;
     }
     return result;
