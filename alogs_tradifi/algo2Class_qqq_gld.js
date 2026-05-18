@@ -257,15 +257,15 @@ export class Algo2QqqGld {
     if (isRebalWeek) {
       const t = this.tranches.find(tr => tr.tranche_num === rebalTrancheNum);
       if (t) {
-        const hold_qqq = (qqq_mom_avg >= 0) && !is_backwardation;
-        const hold_gld = gld_mom_avg >= 0;
+        const hold_qqq = !is_backwardation;
+        const hold_gld = true;
         const rebalActions = this._calcRebalanceActions(t, qqq_lv_price, gld_lv_price, hold_qqq, hold_gld);
         actions.push(...rebalActions);
       }
     }
 
     // [4] 콘탱고 복귀: QQQ_LV 0주인 트렌치 전체에 50% 재매수 (리밸런싱 대상 제외)
-    if (!is_backwardation && qqq_mom_avg >= 0) {
+    if (!is_backwardation) {
       for (const t of this.tranches) {
         if (t.tranche_num === rebalTrancheNum) continue;
         if (t.shares[TICKER_QQQ_LV] === 0) {
@@ -282,18 +282,16 @@ export class Algo2QqqGld {
     }
 
     // [5] TIP 복귀: GLD_LV 0주인 트렌치 전체에 50% 재매수 (리밸런싱 대상 제외, tip_avg_ret >= 0은 [1]에서 보장)
-    if (gld_mom_avg >= 0) {
-      for (const t of this.tranches) {
-        if (t.tranche_num === rebalTrancheNum) continue;
-        if (t.shares[TICKER_GLD_LV] === 0) {
-          const tEquity = t.cash + (t.shares[TICKER_QQQ_LV] * qqq_lv_price);
-          const targetShares = Math.floor(tEquity * 0.5 / gld_lv_price);
-          if (targetShares > 0) {
-            actions.push({
-              tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'buy',
-              shares: targetShares, price: gld_lv_price, reason: 'TIP 복귀',
-            });
-          }
+    for (const t of this.tranches) {
+      if (t.tranche_num === rebalTrancheNum) continue;
+      if (t.shares[TICKER_GLD_LV] === 0) {
+        const tEquity = t.cash + (t.shares[TICKER_QQQ_LV] * qqq_lv_price);
+        const targetShares = Math.floor(tEquity * 0.5 / gld_lv_price);
+        if (targetShares > 0) {
+          actions.push({
+            tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'buy',
+            shares: targetShares, price: gld_lv_price, reason: 'TIP 복귀',
+          });
         }
       }
     }
