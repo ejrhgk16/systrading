@@ -4,38 +4,34 @@ export class Tranche {
   /**
    * @param {number} trancheNum
    * @param {number} capital
-   * @param {string} ticker1 - 첫 번째 자산 티커 (예: 'QLD')
-   * @param {string} ticker2 - 두 번째 자산 티커 (예: 'UGL')
+   * @param {...string} tickers - N개 자산 티커 (예: 'TQQQ', 'UGL', 'CTA')
    */
-  constructor(trancheNum, capital, ticker1, ticker2) {
+  constructor(trancheNum, capital, ...tickers) {
     this.tranche_num = trancheNum;
     this.cash = capital;
-    this.ticker1 = ticker1;
-    this.ticker2 = ticker2;
+    this.tickers = tickers;
 
     // 자산별 보유/평단가
-    this.shares = { [ticker1]: 0, [ticker2]: 0 };
-    this.avg_price = { [ticker1]: 0, [ticker2]: 0 };
+    this.shares = Object.fromEntries(tickers.map(t => [t, 0]));
+    this.avg_price = Object.fromEntries(tickers.map(t => [t, 0]));
     this.equity = capital;
   }
 
   /** Firestore 데이터로 복원 */
-  static fromData(data, ticker1, ticker2) {
-    const t = new Tranche(data.tranche_num, 0, ticker1, ticker2);
+  static fromData(data, ...tickers) {
+    const t = new Tranche(data.tranche_num, 0, ...tickers);
     t.cash = data.cash;
-    t.shares[ticker1] = data.shares?.[ticker1] ?? 0;
-    t.shares[ticker2] = data.shares?.[ticker2] ?? 0;
-    t.avg_price[ticker1] = data.avg_price?.[ticker1] ?? 0;
-    t.avg_price[ticker2] = data.avg_price?.[ticker2] ?? 0;
+    for (const tk of tickers) {
+      t.shares[tk] = data.shares?.[tk] ?? 0;
+      t.avg_price[tk] = data.avg_price?.[tk] ?? 0;
+    }
     t.equity = data.equity ?? 0;
     return t;
   }
 
   /** 현재가 기준 equity 갱신 */
-  updateEquity(price1, price2) {
-    this.equity = this.cash
-      + (this.shares[this.ticker1] * price1)
-      + (this.shares[this.ticker2] * price2);
+  updateEquity(prices) {
+    this.equity = this.cash + this.tickers.reduce((sum, t) => sum + this.shares[t] * (prices[t] || 0), 0);
     return this.equity;
   }
 

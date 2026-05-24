@@ -1,4 +1,20 @@
 {
+  "scripts": {
+    "preview": "vite preview",
+    "harness": "node tools/scripts/execute.mjs",
+    "test": "npm run test:unit",
+    "test:unit": "node test/*.test.js",
+    "test:watch": "node --watch test/*.test.js",
+    "lint": "eslint . --max-warnings 0 && node tools/linters/check-quality.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "validate:architecture": "node tools/validators/check-architecture.mjs",
+    "validate:docs": "node tools/validators/check-docs.mjs",
+    "validate:tests": "node tools/validators/check-test-harness.mjs",
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm run validate:architecture && npm run validate:docs && npm run validate:tests && npm run test",
+    "finish-plan": "node tools/scripts/finish-plan.mjs",
+    "prepare": "node tools/scripts/install-hooks.mjs"
+  },
   "dependencies": {
     "axios": "^1.13.4",
     "bybit-api": "^4.2.7",

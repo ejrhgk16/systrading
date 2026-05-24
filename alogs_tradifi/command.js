@@ -25,7 +25,8 @@ export function registerTradifiCommands(strategies) {
     if (subCmd === 'run')    return ta2._cmdRun();
     if (subCmd === 'check')  return ta2._cmdCheck();
     if (subCmd === 'adjust') return ta2._cmdAdjust(args);
-    return 'ta2 [status|init|add|sub|run|check|adjust]';
+    if (subCmd === 'weight') return ta2._cmdWeight(args);
+    return 'ta2 [status|init|add|sub|run|check|adjust|weight]';
   };
   registerCommand('ta2', ta2Handler);
   registerCommand('qg',  ta2Handler);
@@ -84,7 +85,7 @@ function cmdTaConfirm(strategies) {
     prompt += `  #${i + 1} ${prefix} ${a.ticker} ${kr} ${a.shares}주 @ ~$${a.price.toFixed(2)}\n`;
   });
   prompt += '\n' + buildNetSummary(allActions);
-  prompt += '\n번호 체결가 / all / all open 입력';
+  prompt += '\n번호 체결가 / 번호 open / all / all open 입력';
 
   return {
     prompt,
@@ -115,14 +116,22 @@ function cmdTaConfirm(strategies) {
         return results.join('\n') + `\n=== ${results.length}건 체결 완료 ===`;
       }
 
-      // 개별: "번호 체결가"
+      // 개별: "번호 체결가" 또는 "번호 open"
       const parts = trimmed.split(/\s+/);
       const idx   = parseInt(parts[0]) - 1;
       if (isNaN(idx) || idx < 0 || idx >= allActions.length) {
         return `번호 입력 (1~${allActions.length})`;
       }
       const action = allActions[idx];
-      const price  = parts[1] ? parseFloat(parts[1]) : action.price;
+
+      let price;
+      if (parts[1] === 'open') {
+        const prices = await fetchTodayOpenPrices([action.ticker]);
+        price = prices[action.ticker];
+        if (!price) return `${action.ticker} 시가 조회 실패`;
+      } else {
+        price = parts[1] ? parseFloat(parts[1]) : action.price;
+      }
       if (isNaN(price) || price <= 0) return '체결가 입력 필요 (예: 1 79.50)';
 
       const result = await action.strategy._applyAction(action, price);
