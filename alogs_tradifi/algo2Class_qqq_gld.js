@@ -33,7 +33,7 @@ export class Algo2QqqGld {
   static QQQ_MOM_FILTER_ENABLED = false;
 
   static GLD_MOM_BUFFER         = 0.001;
-  static GLD_MOM_FILTER_ENABLED = true;
+  static GLD_MOM_FILTER_ENABLED = false;
 
   static WEIGHTS          = [0.35, 0.35, 0.30];
   static TIP_DANGER_WEIGHTS = [0.25, 0.25, 0.50];
@@ -554,20 +554,6 @@ export class Algo2QqqGld {
     }
     msg += `  필터: TIP=${this.tip_state} VIX=${vixStr} QQQmom=${this.qqq_mom_state} GLDmom=${this.gld_mom_state}\n`;
     return msg;
-  }
-
-  _cmdWeight(args) {
-    if (args.length < 3) return '사용법: ta2 weight <QQQ비중> <GLD비중> <CTA비중> (예: ta2 weight 35 35 30)';
-
-    const w = args.slice(0, 3).map(Number);
-    if (w.some(v => isNaN(v) || v <= 0)) return '비중은 0보다 큰 숫자로 입력';
-
-    const sum = w.reduce((a, b) => a + b, 0);
-    this.weights = w.map(v => v / sum);  // 자동 정규화
-
-    setTradeStatus('qqq_gld', { weights: this.weights, updated_at: new Date().toISOString() });
-
-    return `가중치 변경: QQQ ${(this.weights[0]*100).toFixed(0)}%, GLD ${(this.weights[1]*100).toFixed(0)}%, CTA ${(this.weights[2]*100).toFixed(0)}%`;
   }
 
   _cmdStatus(args) {
