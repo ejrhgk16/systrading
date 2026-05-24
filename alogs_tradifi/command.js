@@ -26,7 +26,8 @@ export function registerTradifiCommands(strategies) {
     if (subCmd === 'check')  return ta2._cmdCheck();
     if (subCmd === 'adjust') return ta2._cmdAdjust(args);
     if (subCmd === 'weight') return ta2._cmdWeight(args);
-    return 'ta2 [status|init|add|sub|run|check|adjust|weight]';
+    if (subCmd === 'clear')  return ta2._cmdClearPending();
+    return 'ta2 [status|init|add|sub|run|check|adjust|weight|clear]';
   };
   registerCommand('ta2', ta2Handler);
   registerCommand('qg',  ta2Handler);

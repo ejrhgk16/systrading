@@ -35,6 +35,9 @@ export class Algo2QqqGld {
   static GLD_MOM_BUFFER         = 0.001;
   static GLD_MOM_FILTER_ENABLED = true;
 
+  static WEIGHTS          = [0.35, 0.35, 0.30];
+  static TIP_DANGER_WEIGHTS = [0.25, 0.25, 0.50];
+
   constructor() {
     this.name = 'algo2_qqq_gld';
 
@@ -42,14 +45,14 @@ export class Algo2QqqGld {
     this.tranches = [];
     // 공유 상태
     this.lastRebalIsoWeek = null;
+    this.lastRebalDate = null;
+    this.lastRebalTrancheNum = null;
     this.lastSignals = null;
 
     // 오늘 생성된 액션 (조회용)
     this.pendingActions = [];
 
-    // 가중치 로드: .env 기본값, Firestore 저장값 우선 (set()에서 덮어씀)
-    this.weights = (process.env.ALGO2_WEIGHTS || '35,35,30')
-        .split(',').map(Number).map(w => w / 100);
+    this.weights = [...Algo2QqqGld.WEIGHTS];
 
     // ─── 필터 상태 (히스테리시스 상태머신) ──────────────────
     this.tip_state     = 'normal';  // 'normal' | 'danger'
@@ -75,12 +78,12 @@ export class Algo2QqqGld {
     const shared = await getTradeStatus('qqq_gld');
     if (shared) {
       this.lastRebalIsoWeek = shared.last_rebal_iso_week ?? null;
+      this.lastRebalDate = shared.last_rebal_date ?? null;
+      this.lastRebalTrancheNum = shared.last_rebal_tranche_num ?? null;
       this.lastSignals = shared.last_signals ?? null;
       this.pendingActions = this._normalizePendingActions(shared.pending_actions ?? []);
-      if (shared.weights && Array.isArray(shared.weights) && shared.weights.length > 0) {
-        this.weights = shared.weights;
-      }
       this.tip_state     = shared.tip_state ?? 'normal';
+      this.weights = this.tip_state === 'danger' ? [...Algo2QqqGld.TIP_DANGER_WEIGHTS] : [...Algo2QqqGld.WEIGHTS];
       this.vix_ts_state  = shared.vix_ts_state ?? 0;
       this.qqq_mom_state = shared.qqq_mom_state ?? 'normal';
       this.gld_mom_state = shared.gld_mom_state ?? 'normal';
@@ -95,6 +98,20 @@ export class Algo2QqqGld {
 
   async scheduleFunc() {
     try {
+      // [신규] 이전 pending action 알림
+      if (this.pendingActions.length > 0) {
+        const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
+        let reminderMsg = `⚠️ [QQQ+GLD] 미체결 액션 알림\n\n`;
+        reminderMsg += `이전 사이클에서 confirm되지 않은 액션 ${this.pendingActions.length}건이 남아있습니다:\n`;
+        for (const a of this.pendingActions) {
+          const actionKr = a.action === 'buy' ? '매수' : '매도';
+          reminderMsg += `  [트렌치#${a.tranche_num}] ${a.ticker} ${actionKr} ${a.shares}주 @ ~$${a.price.toFixed(2)} (${a.reason})\n`;
+        }
+        reminderMsg += `\nCLI에서 'ta2 confirm'으로 체결해주세요.`;
+        await sendTelegram(reminderMsg);
+        consoleLogger.info(`${this.name} pending reminder 발송 (${this.pendingActions.length}건)`);
+      }
+
       const indicators = await this.fetchIndicators();
       consoleLogger.info(`${this.name} 시그널:`, indicators);
 
@@ -257,11 +274,13 @@ export class Algo2QqqGld {
 
     // ─── 상태머신 업데이트 ──────────────────────────────────
 
-    // TIP state
+    // TIP state + 가중치 전환
     if (this.tip_state === 'normal' && tip_avg_ret < -TIP_BUFFER) {
       this.tip_state = 'danger';
+      this.weights = [...Algo2QqqGld.TIP_DANGER_WEIGHTS];
     } else if (this.tip_state === 'danger' && tip_avg_ret > TIP_BUFFER) {
       this.tip_state = 'normal';
+      this.weights = [...Algo2QqqGld.WEIGHTS];
     }
 
     // VIX term structure state
@@ -301,15 +320,17 @@ export class Algo2QqqGld {
             tranche_num: t.tranche_num, ticker: TICKER_QQQ_LV, action: 'sell',
             shares: t.shares[TICKER_QQQ_LV], price: qqq_lv_price, reason: 'TIP filter',
           });
+          t.shares[TICKER_QQQ_LV] = 0;
         }
         if (t.shares[TICKER_GLD_LV] > 0) {
           actions.push({
             tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'sell',
             shares: t.shares[TICKER_GLD_LV], price: gld_lv_price, reason: 'TIP filter',
           });
+          t.shares[TICKER_GLD_LV] = 0;
         }
       }
-      return this._setPendingActions(actions);
+      // early return 제거 → 이후 로직(CTA 리밸런싱) 계속 진행
     }
 
     // [2] VIX 백워데이션: 모든 트렌치 QQQ_LV만 청산
@@ -491,6 +512,8 @@ export class Algo2QqqGld {
 
     const shared = {
       last_rebal_iso_week: isRebalWeek ? isoWeek : this.lastRebalIsoWeek,
+      last_rebal_date: isRebalWeek ? indicators.date : this.lastRebalDate,
+      last_rebal_tranche_num: isRebalWeek ? ((isoWeek % 4) + 1) : this.lastRebalTrancheNum,
       last_signals: {
         is_backwardation: indicators.is_backwardation,
         tip_avg_ret: indicators.tip_avg_ret,
@@ -503,7 +526,6 @@ export class Algo2QqqGld {
         date: indicators.date,
       },
       pending_actions: this._normalizePendingActions(this.pendingActions),
-      weights: this.weights,
       tip_state: this.tip_state,
       vix_ts_state: this.vix_ts_state,
       qqq_mom_state: this.qqq_mom_state,
@@ -512,7 +534,11 @@ export class Algo2QqqGld {
     };
     await setTradeStatus('qqq_gld', shared);
 
-    if (isRebalWeek) this.lastRebalIsoWeek = isoWeek;
+    if (isRebalWeek) {
+      this.lastRebalIsoWeek = isoWeek;
+      this.lastRebalDate = indicators.date;
+      this.lastRebalTrancheNum = (isoWeek % 4) + 1;
+    }
     this.lastSignals = shared.last_signals;
   }
 
@@ -571,6 +597,14 @@ export class Algo2QqqGld {
     result += `  QQQ모멘텀: ${this.qqq_mom_state} (buf:±${(QQQ_MOM_BUFFER*100).toFixed(1)}%, ${QQQ_MOM_FILTER_ENABLED?'ON':'OFF'})\n`;
     result += `  GLD모멘텀: ${this.gld_mom_state} (buf:±${(GLD_MOM_BUFFER*100).toFixed(1)}%, ${GLD_MOM_FILTER_ENABLED?'ON':'OFF'})\n`;
 
+    result += `\n가중치: ${TICKER_QQQ_LV} ${(this.weights[0]*100).toFixed(0)}% / ${TICKER_GLD_LV} ${(this.weights[1]*100).toFixed(0)}% / ${TICKER_CTA_LV} ${(this.weights[2]*100).toFixed(0)}%\n`;
+
+    if (this.lastRebalTrancheNum && this.lastRebalDate) {
+      result += `마지막 리밸런싱: 트렌치 #${this.lastRebalTrancheNum} (${this.lastRebalDate})\n`;
+    } else {
+      result += `마지막 리밸런싱: 없음\n`;
+    }
+
     if (this.lastSignals) {
       const s = this.lastSignals;
       result += `\n시그널 (${s.date}):\n`;
@@ -579,6 +613,10 @@ export class Algo2QqqGld {
       result += `  GLD: ${(s.gld_mom_avg * 100).toFixed(1)}%\n`;
       result += `  CTA: ${(s.cta_mom_avg * 100).toFixed(1)}%\n`;
       result += `  ${TICKER_QQQ_LV}: $${s.qqq_lv_price?.toFixed(2)}, ${TICKER_GLD_LV}: $${s.gld_lv_price?.toFixed(2)}, ${TICKER_CTA_LV}: $${s.cta_price?.toFixed(2)}\n`;
+    }
+
+    if (this.pendingActions.length > 0) {
+      result += `\n⚠️ 대기 중인 미체결 액션 ${this.pendingActions.length}건 (confirm 필요)\n`;
     }
     return result;
   }
@@ -679,6 +717,13 @@ export class Algo2QqqGld {
     consoleLogger.info(`${this.name} 강제 실행: lastRebalIsoWeek ${before} → null, 트렌치#${targetTranche} 리밸런싱 대상`);
     await this.scheduleFunc();
     return `강제 실행 완료 (W${isoWeek}, 트렌치#${targetTranche})`;
+  }
+
+  /** pending 초기화 */
+  async _cmdClearPending() {
+    const before = this.pendingActions.length;
+    await this.clearPendingActions();
+    return `pending 초기화 완료 (${before}건 → 0건)`;
   }
 
   /** 현재 상태 기준 pending 재계산 + 저장 */
