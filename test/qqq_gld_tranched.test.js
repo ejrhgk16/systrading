@@ -4,6 +4,7 @@
  */
 import { Algo2QqqGld } from '../alogs_tradifi/algo2Class_qqq_gld.js';
 import { Tranche } from '../alogs_tradifi/algo2Class_tranche.js';
+import { consoleLogger } from '../common/logger.js';
 
 let passed = 0;
 let failed = 0;
@@ -396,22 +397,14 @@ console.log('\n[Test 18] saveState weights 저장');
 }
 
 
-// ─── Test 19: set()에서 Firestore의 weights 복원 ──────────
-console.log('\n[Test 19] weights 복원 로직');
+// ─── Test 19: Constructor weights 기본값 ──────────
+console.log('\n[Test 19] Constructor weights 기본값');
 {
-  // set() 메서드 내 복원 로직이 존재하는지만 검증
-  // 실제 Firestore 호출은 통합 테스트 영역
   const algo = createTestInstance();
-  // 복원 로직: shared.weights가 배열이고 length>0이면 this.weights에 할당
-  // 생성자에서 기본값이 설정되었는지 확인
   assert(algo.weights !== undefined, '생성자에서 weights 기본값 설정');
-  // 수동으로 복원 로직 시뮬레이션
-  const mockShared = { weights: [0.5, 0.25, 0.25] };
-  if (mockShared.weights && Array.isArray(mockShared.weights) && mockShared.weights.length > 0) {
-    algo.weights = mockShared.weights;
-  }
-  assert(Math.abs(algo.weights[0] - 0.5) < 0.001, `복원 후 weights[0] = ${algo.weights[0]} (expected 0.5)`);
-  assert(Math.abs(algo.weights[1] - 0.25) < 0.001, `복원 후 weights[1] = ${algo.weights[1]} (expected 0.25)`);
+  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.35)`);
+  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.35)`);
+  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.30)`);
 }
 
 
@@ -512,6 +505,299 @@ console.log('\n[Test 24] _applyAction CTA price fallback');
   assert(ctaP === 30, `ctaP fallback = price (${ctaP})`);
   assert(qqqLvP === 30, `qqqLvP fallback = price (${qqqLvP})`);
   assert(gldLvP === 30, `gldLvP fallback = price (${gldLvP})`);
+}
+
+
+
+// ─── Test 25: Constructor — static WEIGHTS/TIP_DANGER_WEIGHTS 적용 ──
+console.log('\n[Test 25] Constructor — static WEIGHTS/TIP_DANGER_WEIGHTS');
+{
+  const algo = new Algo2QqqGld();
+  assert(Array.isArray(algo.weights), 'weights는 배열');
+  assert(algo.weights.length === 3, 'weights 길이 3');
+  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.35)`);
+  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.35)`);
+  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.30)`);
+  assert(Algo2QqqGld.WEIGHTS[0] === 0.35, 'static WEIGHTS[0]');
+  assert(Algo2QqqGld.WEIGHTS[1] === 0.35, 'static WEIGHTS[1]');
+  assert(Algo2QqqGld.WEIGHTS[2] === 0.30, 'static WEIGHTS[2]');
+  assert(Algo2QqqGld.TIP_DANGER_WEIGHTS[0] === 0.25, 'static TIP_DANGER_WEIGHTS[0]');
+  assert(Algo2QqqGld.TIP_DANGER_WEIGHTS[1] === 0.25, 'static TIP_DANGER_WEIGHTS[1]');
+  assert(Algo2QqqGld.TIP_DANGER_WEIGHTS[2] === 0.50, 'static TIP_DANGER_WEIGHTS[2]');
+}
+
+
+// ─── Test 26: TIP normal→danger — weights 전환 ─────────────────
+console.log('\n[Test 26] TIP normal→danger — weights 전환');
+{
+  const algo = createTestInstance();
+  algo.tip_state = 'normal';
+  algo.weights = [0.35, 0.35, 0.30];
+  algo.lastRebalIsoWeek = algo._getISOWeek(); // 리밸런싱 방지
+
+  const indicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,  // < -TIP_BUFFER → danger
+    qqq_mom_avg: 0.05,
+    gld_mom_avg: 0.03,
+    qqq_lv_price: 80,
+    gld_lv_price: 45,
+    cta_price: 30,
+    vix: 15,
+    vix3m: 20,
+  };
+
+  algo.determineActions(indicators);
+  assert(algo.tip_state === 'danger', `tip_state = ${algo.tip_state} (expected 'danger')`);
+  assert(Math.abs(algo.weights[0] - 0.25) < 0.001, `전환 후 weights[0] = ${algo.weights[0]} (expected 0.25)`);
+  assert(Math.abs(algo.weights[1] - 0.25) < 0.001, `전환 후 weights[1] = ${algo.weights[1]} (expected 0.25)`);
+  assert(Math.abs(algo.weights[2] - 0.50) < 0.001, `전환 후 weights[2] = ${algo.weights[2]} (expected 0.50)`);
+}
+
+
+// ─── Test 27: TIP danger→normal — weights 복원 ─────────────────
+console.log('\n[Test 27] TIP danger→normal — weights 복원');
+{
+  const algo = createTestInstance();
+  algo.tip_state = 'danger';
+  algo.weights = [0.25, 0.25, 0.50];
+  algo.lastRebalIsoWeek = algo._getISOWeek(); // 리밸런싱 방지
+
+  const indicators = {
+    is_backwardation: false,
+    tip_avg_ret: 0.02,  // > +TIP_BUFFER → normal
+    qqq_mom_avg: 0.05,
+    gld_mom_avg: 0.03,
+    qqq_lv_price: 80,
+    gld_lv_price: 45,
+    cta_price: 30,
+    vix: 15,
+    vix3m: 20,
+  };
+
+  algo.determineActions(indicators);
+  assert(algo.tip_state === 'normal', `tip_state = ${algo.tip_state} (expected 'normal')`);
+  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `복원 후 weights[0] = ${algo.weights[0]} (expected 0.35)`);
+  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `복원 후 weights[1] = ${algo.weights[1]} (expected 0.35)`);
+  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `복원 후 weights[2] = ${algo.weights[2]} (expected 0.30)`);
+}
+
+
+// ─── Test 28: TIP 중복 danger 전이 방지 ─────────────────────────
+console.log('\n[Test 28] TIP 중복 danger 전이 방지');
+{
+  const algo = createTestInstance();
+  algo.tip_state = 'danger';
+  algo.weights = [0.25, 0.25, 0.50];
+  algo.lastRebalIsoWeek = algo._getISOWeek();
+
+  const indicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,  // 이미 danger인데 또 danger 조건
+    qqq_mom_avg: 0.05,
+    gld_mom_avg: 0.03,
+    qqq_lv_price: 80,
+    gld_lv_price: 45,
+    cta_price: 30,
+    vix: 15,
+    vix3m: 20,
+  };
+
+  algo.determineActions(indicators);
+  assert(algo.tip_state === 'danger', 'tip_state still danger');
+  assert(Math.abs(algo.weights[0] - 0.25) < 0.001, 'weights[0] TIP_DANGER_WEIGHTS 유지');
+  assert(Math.abs(algo.weights[1] - 0.25) < 0.001, 'weights[1] TIP_DANGER_WEIGHTS 유지');
+  assert(Math.abs(algo.weights[2] - 0.50) < 0.001, 'weights[2] TIP_DANGER_WEIGHTS 유지');
+}
+
+
+// ─── Test 29: saveState — tipDangerWeights, _originalWeights 미저장 ──
+console.log('\n[Test 29] saveState — weights 미저장');
+{
+  const algo = createTestInstance();
+  const sharedFields = Object.keys({
+    last_rebal_iso_week: null,
+    last_signals: null,
+    pending_actions: null,
+    tip_state: null,
+    vix_ts_state: null,
+    qqq_mom_state: null,
+    gld_mom_state: null,
+    updated_at: null,
+  });
+  assert(!sharedFields.includes('weights'), 'saveState shared에 weights 미포함');
+}
+
+
+// ─── Test 30: TIP danger 상태 재시작 — weights 동기화 ──────────
+console.log('\n[Test 30] TIP danger 재시작 → weights 동기화');
+{
+  const algo = createTestInstance();
+  // constructor 후 weights는 WEIGHTS
+  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `초기 weights[0] = ${algo.weights[0]}`);
+  // set()에서 tip_state='danger' 복원 시뮬레이션
+  algo.tip_state = 'danger';
+  algo.weights = algo.tip_state === 'danger' ? [...Algo2QqqGld.TIP_DANGER_WEIGHTS] : [...Algo2QqqGld.WEIGHTS];
+  assert(Math.abs(algo.weights[0] - 0.25) < 0.001, `재시작 후 weights[0] = ${algo.weights[0]} (expected 0.25)`);
+  assert(Math.abs(algo.weights[1] - 0.25) < 0.001, `재시작 후 weights[1] = ${algo.weights[1]} (expected 0.25)`);
+  assert(Math.abs(algo.weights[2] - 0.50) < 0.001, `재시작 후 weights[2] = ${algo.weights[2]} (expected 0.50)`);
+
+  // normal 복원도 동일 로직
+  algo.tip_state = 'normal';
+  algo.weights = algo.tip_state === 'danger' ? [...Algo2QqqGld.TIP_DANGER_WEIGHTS] : [...Algo2QqqGld.WEIGHTS];
+  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `normal 복원 weights[0] = ${algo.weights[0]} (expected 0.35)`);
+}
+
+
+// ─── Test 31: TIP 필터 발동 시 CTA 리밸런싱 유지 (early return 제거 검증) ──
+console.log('\n[Test 31] TIP 필터 + CTA 리밸런싱 유지');
+{
+  const algo = createTestInstance();
+  // TIP danger 상태 수동 설정
+  algo.tip_state = 'danger';
+  // 리밸런싱 강제 트리거 (lastRebalIsoWeek를 현재 주와 다르게 설정)
+  algo.lastRebalIsoWeek = algo._getISOWeek() - 1;
+
+  // 4개 트렌치 모두 초기화: TQQQ/GLD 보유 + CTA는 0주
+  for (const t of algo.tranches) {
+    t.shares[T1] = 10;
+    t.shares[T2] = 5;
+    t.shares[T3] = 0;
+    t.cash = 1000;
+  }
+
+  const indicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,
+    qqq_mom_avg: 0.05,
+    gld_mom_avg: 0.03,
+    qqq_lv_price: 80,
+    gld_lv_price: 45,
+    cta_price: 30,
+    vix: 15,
+    vix3m: 20,
+  };
+
+  const actions = algo.determineActions(indicators);
+
+  // TIP 필터 sell 액션 확인
+  const tipSells = actions.filter(a => a.reason === 'TIP filter');
+  assert(tipSells.length > 0, `TIP 필터 sell 액션 ${tipSells.length}개 (존재해야 함)`);
+
+  // TQQQ/GLD 중복 sell 액션 없음: TIP 이외의 reason으로 TQQQ/GLD를 매도하는 액션이 없어야 함
+  const nonTipSells = actions.filter(a => a.reason !== 'TIP filter' && a.action === 'sell' && (a.ticker === T1 || a.ticker === T2));
+  assert(nonTipSells.length === 0, `TQQQ/GLD 중복 sell 액션 ${nonTipSells.length}개 (expected 0)`);
+
+  // CTA 리밸런싱 액션 존재 (buy 또는 sell)
+  const ctaActions = actions.filter(a => a.ticker === T3);
+  assert(ctaActions.length > 0, `CTA 액션 ${ctaActions.length}개 (CTA 리밸런싱 존재해야 함)`);
+
+  const ctaRebal = actions.find(a => a.ticker === T3 && a.reason === 'rebalance');
+  assert(ctaRebal !== undefined, 'CTA 리밸런싱(rebalance) 액션 존재');
+}
+
+
+
+// ─── Test 32: pending reminder 메시지 포맷 ──────────────────
+console.log('\n[Test 32] pending reminder 메시지 포맷');
+{
+  const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
+  const fakeActions = [
+    { action: 'buy',  tranche_num: 1, ticker: TICKER_QQQ_LV, shares: 10, price: 80.50, reason: 'rebalance' },
+    { action: 'sell', tranche_num: 2, ticker: TICKER_GLD_LV, shares: 5,  price: 45.20, reason: 'TIP filter' },
+  ];
+
+  let msg = `⚠️ [QQQ+GLD] 미체결 액션 알림\n\n`;
+  msg += `이전 사이클에서 confirm되지 않은 액션 ${fakeActions.length}건이 남아있습니다:\n`;
+  for (const a of fakeActions) {
+    const actionKr = a.action === 'buy' ? '매수' : '매도';
+    msg += `  [트렌치#${a.tranche_num}] ${a.ticker} ${actionKr} ${a.shares}주 @ ~$${a.price.toFixed(2)} (${a.reason})\n`;
+  }
+  msg += `\nCLI에서 'ta2 confirm'으로 체결해주세요.`;
+
+  assert(msg.includes('⚠️'), '메시지에 경고 이모지 포함');
+  assert(msg.includes('[QQQ+GLD] 미체결 액션 알림'), '메시지 제목 포함');
+  assert(msg.includes('2건'), '메시지에 액션 개수 포함');
+  assert(msg.includes('[트렌치#1]'), '트렌치#1 정보 포함');
+  assert(msg.includes('[트렌치#2]'), '트렌치#2 정보 포함');
+  assert(msg.includes(TICKER_QQQ_LV), 'TQQQ 티커 포함');
+  assert(msg.includes(TICKER_GLD_LV), 'UGL 티커 포함');
+  assert(msg.includes('매수'), '매수 키워드 포함');
+  assert(msg.includes('매도'), '매도 키워드 포함');
+  assert(msg.includes('ta2 confirm'), 'CLI 안내 포함');
+  assert(msg.includes('$80.50'), '가격 포맷 포함');
+  assert(msg.includes('$45.20'), '가격 포맷 포함');
+}
+
+
+// ─── Test 33: scheduleFunc — pendingActions 있을 때 Telegram 알림 ──
+console.log('\n[Test 33] scheduleFunc — pendingActions > 0 → Telegram 알림');
+{
+  const algo = createTestInstance();
+
+  // pendingActions 세팅
+  algo.pendingActions = [
+    { action: 'buy', tranche_num: 1, ticker: 'TQQQ', shares: 10, price: 80.50, reason: 'rebalance' },
+  ];
+
+  // fetchIndicators mock (실제 API 호출 방지)
+  algo.fetchIndicators = async () => ({
+    is_backwardation: false, tip_avg_ret: 0.02, qqq_mom_avg: 0.05, gld_mom_avg: 0.03, cta_mom_avg: 0.05,
+    qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30, vix: 15, vix3m: 20, date: '2026-05-21',
+  });
+
+  // sendSignalTelegram mock (실제 Telegram 발송 방지)
+  algo.sendSignalTelegram = async () => {};
+  // saveState mock (Firestore 호출 방지)
+  algo.saveState = async () => {};
+
+  const loggerMessages = [];
+  const origInfo = consoleLogger.info;
+  consoleLogger.info = (msg) => {
+    loggerMessages.push(msg);
+    origInfo.call(consoleLogger, msg);
+  };
+
+  try {
+    await algo.scheduleFunc();
+    const reminderLog = loggerMessages.find(m => m.includes('pending reminder 발송'));
+    assert(reminderLog !== undefined, 'pending reminder 로그 출력됨');
+    assert(reminderLog.includes('1건'), `로그에 액션 건수 포함: "${reminderLog}"`);
+  } finally {
+    consoleLogger.info = origInfo;
+  }
+}
+
+
+// ─── Test 34: scheduleFunc — pendingActions 없을 때 알림 미발송 ──
+console.log('\n[Test 34] scheduleFunc — pendingActions = 0 → 알림 없음');
+{
+  const algo = createTestInstance();
+  algo.pendingActions = [];
+
+  // mock deps
+  algo.fetchIndicators = async () => ({
+    is_backwardation: false, tip_avg_ret: 0.02, qqq_mom_avg: 0.05, gld_mom_avg: 0.03, cta_mom_avg: 0.05,
+    qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30, vix: 15, vix3m: 20, date: '2026-05-21',
+  });
+  algo.sendSignalTelegram = async () => {};
+  algo.saveState = async () => {};
+
+  let loggerCalled = false;
+  const origInfo = consoleLogger.info;
+  consoleLogger.info = (msg) => {
+    if (msg.includes('pending reminder')) {
+      loggerCalled = true;
+    }
+    origInfo.call(consoleLogger, msg);
+  };
+
+  try {
+    await algo.scheduleFunc();
+    assert(!loggerCalled, 'pendingActions=0 → pending reminder 로그 없음');
+  } finally {
+    consoleLogger.info = origInfo;
+  }
 }
 
 
