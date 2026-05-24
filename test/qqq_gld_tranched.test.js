@@ -102,6 +102,8 @@ console.log('\n[Test 4] TIP 필터 (전량 청산)');
     qqq_lv_price: 80,
     gld_lv_price: 45,
     cta_price: 30,
+    vix: 15,
+    vix3m: 20,
   };
 
   const actions = algo.determineActions(indicators);
@@ -131,6 +133,8 @@ console.log('\n[Test 5] VIX 백워데이션 (QLD만 청산)');
     qqq_lv_price: 80,
     gld_lv_price: 45,
     cta_price: 30,
+    vix: 25,     // vix/vix3m ratio = 1.25 > 1.02 → backwardation
+    vix3m: 20,
   };
 
   const actions = algo.determineActions(indicators);
@@ -208,6 +212,8 @@ console.log('\n[Test 8] 콘탱고 복귀 (QLD 0주 → 재매수)');
     qqq_lv_price: 80,
     gld_lv_price: 45,
     cta_price: 30,
+    vix: 15,     // vix/vix3m ratio = 0.75 < 0.98 → contango
+    vix3m: 20,
   };
 
   const actions = algo.determineActions(indicators);
@@ -260,6 +266,8 @@ console.log('\n[Test 10] VIX 백워데이션 + CTA 보유 시 CTA 보존');
     qqq_lv_price: 80,
     gld_lv_price: 45,
     cta_price: 30,
+    vix: 25,     // vix/vix3m ratio = 1.25 > 1.02 → backwardation
+    vix3m: 20,
   };
 
   const actions = algo.determineActions(indicators);

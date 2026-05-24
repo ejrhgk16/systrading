@@ -22,6 +22,19 @@ export class Algo2QqqGld {
   static TICKER_CTA = 'CTA';
   static TICKER_CTA_LV = 'CTA';   // 레버리지 ETF 없음, 현물 그대로
 
+  // ─── 필터 파라미터 ──────────────────────────────────────────
+  static TIP_BUFFER             = 0.005;
+  static TIP_FILTER_ENABLED     = true;
+
+  static VIX_TS_BUFFER          = 0.02;
+  static VIX_FILTER_ENABLED     = true;
+
+  static QQQ_MOM_BUFFER         = 0.001;
+  static QQQ_MOM_FILTER_ENABLED = false;
+
+  static GLD_MOM_BUFFER         = 0.001;
+  static GLD_MOM_FILTER_ENABLED = true;
+
   constructor() {
     this.name = 'algo2_qqq_gld';
 
@@ -37,6 +50,12 @@ export class Algo2QqqGld {
     // 가중치 로드: .env 기본값, Firestore 저장값 우선 (set()에서 덮어씀)
     this.weights = (process.env.ALGO2_WEIGHTS || '35,35,30')
         .split(',').map(Number).map(w => w / 100);
+
+    // ─── 필터 상태 (히스테리시스 상태머신) ──────────────────
+    this.tip_state     = 'normal';  // 'normal' | 'danger'
+    this.vix_ts_state  = 0;         // 0=contango, 1=backwardation
+    this.qqq_mom_state = 'normal';  // 'normal' | 'danger'
+    this.gld_mom_state = 'normal';  // 'normal' | 'danger'
   }
 
   // ─── 필수 인터페이스 ─────────────────────────────────────────
@@ -61,6 +80,10 @@ export class Algo2QqqGld {
       if (shared.weights && Array.isArray(shared.weights) && shared.weights.length > 0) {
         this.weights = shared.weights;
       }
+      this.tip_state     = shared.tip_state ?? 'normal';
+      this.vix_ts_state  = shared.vix_ts_state ?? 0;
+      this.qqq_mom_state = shared.qqq_mom_state ?? 'normal';
+      this.gld_mom_state = shared.gld_mom_state ?? 'normal';
     }
 
     const initialized = this.tranches.length === 4;
@@ -228,10 +251,50 @@ export class Algo2QqqGld {
   determineActions(indicators) {
     const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
     const actions = [];
-    const { is_backwardation, tip_avg_ret, qqq_mom_avg, gld_mom_avg, qqq_lv_price, gld_lv_price, cta_price } = indicators;
+    const { TIP_BUFFER, VIX_TS_BUFFER, QQQ_MOM_BUFFER, GLD_MOM_BUFFER,
+            TIP_FILTER_ENABLED, VIX_FILTER_ENABLED, QQQ_MOM_FILTER_ENABLED, GLD_MOM_FILTER_ENABLED } = Algo2QqqGld;
+    const { tip_avg_ret, qqq_mom_avg, gld_mom_avg, qqq_lv_price, gld_lv_price, cta_price, vix, vix3m } = indicators;
+
+    // ─── 상태머신 업데이트 ──────────────────────────────────
+
+    // TIP state
+    if (this.tip_state === 'normal' && tip_avg_ret < -TIP_BUFFER) {
+      this.tip_state = 'danger';
+    } else if (this.tip_state === 'danger' && tip_avg_ret > TIP_BUFFER) {
+      this.tip_state = 'normal';
+    }
+
+    // VIX term structure state
+    const vix_ratio = vix / vix3m;
+    if (this.vix_ts_state === 0 && vix_ratio > 1 + VIX_TS_BUFFER) {
+      this.vix_ts_state = 1;
+    } else if (this.vix_ts_state === 1 && vix_ratio < 1 - VIX_TS_BUFFER) {
+      this.vix_ts_state = 0;
+    }
+
+    // QQQ mom state
+    if (this.qqq_mom_state === 'normal' && qqq_mom_avg < -QQQ_MOM_BUFFER) {
+      this.qqq_mom_state = 'danger';
+    } else if (this.qqq_mom_state === 'danger' && qqq_mom_avg > QQQ_MOM_BUFFER) {
+      this.qqq_mom_state = 'normal';
+    }
+
+    // GLD mom state
+    if (this.gld_mom_state === 'normal' && gld_mom_avg < -GLD_MOM_BUFFER) {
+      this.gld_mom_state = 'danger';
+    } else if (this.gld_mom_state === 'danger' && gld_mom_avg > GLD_MOM_BUFFER) {
+      this.gld_mom_state = 'normal';
+    }
+
+    // ─── 필터 체크 헬퍼 ──────────────────────────────────────
+    const qqqCanHold = (!TIP_FILTER_ENABLED || this.tip_state === 'normal')
+                    && (!VIX_FILTER_ENABLED || this.vix_ts_state === 0)
+                    && (!QQQ_MOM_FILTER_ENABLED || this.qqq_mom_state === 'normal');
+    const gldCanHold = (!TIP_FILTER_ENABLED || this.tip_state === 'normal')
+                    && (!GLD_MOM_FILTER_ENABLED || this.gld_mom_state === 'normal');
 
     // [1] TIP 필터: 모든 트렌치 QQQ_LV+GLD_LV 전량 청산 (CTA는 제외)
-    if (tip_avg_ret < 0) {
+    if (TIP_FILTER_ENABLED && this.tip_state === 'danger') {
       for (const t of this.tranches) {
         if (t.shares[TICKER_QQQ_LV] > 0) {
           actions.push({
@@ -249,8 +312,8 @@ export class Algo2QqqGld {
       return this._setPendingActions(actions);
     }
 
-    // [2] VIX 백워데이션: 모든 트렌치 QQQ_LV만 청산 (CTA는 제외)
-    if (is_backwardation) {
+    // [2] VIX 백워데이션: 모든 트렌치 QQQ_LV만 청산
+    if (VIX_FILTER_ENABLED && this.vix_ts_state === 1) {
       for (const t of this.tranches) {
         if (t.shares[TICKER_QQQ_LV] > 0) {
           actions.push({
@@ -261,7 +324,31 @@ export class Algo2QqqGld {
       }
     }
 
-    // [3] 주간 트렌치 리밸런싱
+    // [3] QQQ 모멘텀 필터: 모든 트렌치 QQQ_LV만 청산
+    if (QQQ_MOM_FILTER_ENABLED && this.qqq_mom_state === 'danger') {
+      for (const t of this.tranches) {
+        if (t.shares[TICKER_QQQ_LV] > 0) {
+          actions.push({
+            tranche_num: t.tranche_num, ticker: TICKER_QQQ_LV, action: 'sell',
+            shares: t.shares[TICKER_QQQ_LV], price: qqq_lv_price, reason: 'QQQ mom filter',
+          });
+        }
+      }
+    }
+
+    // [4] GLD 모멘텀 필터: 모든 트렌치 GLD_LV만 청산
+    if (GLD_MOM_FILTER_ENABLED && this.gld_mom_state === 'danger') {
+      for (const t of this.tranches) {
+        if (t.shares[TICKER_GLD_LV] > 0) {
+          actions.push({
+            tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'sell',
+            shares: t.shares[TICKER_GLD_LV], price: gld_lv_price, reason: 'GLD mom filter',
+          });
+        }
+      }
+    }
+
+    // [5] 주간 트렌치 리밸런싱
     const isoWeek = this._getISOWeek();
     const isRebalWeek = this.lastRebalIsoWeek !== isoWeek;
     const rebalTrancheNum = isRebalWeek ? (isoWeek % 4) + 1 : null;
@@ -269,17 +356,15 @@ export class Algo2QqqGld {
     if (isRebalWeek) {
       const t = this.tranches.find(tr => tr.tranche_num === rebalTrancheNum);
       if (t) {
-        const holdQqq = !is_backwardation;
-        const holdGld = true;
-        const holds = [holdQqq, holdGld, true];  // CTA 항상 true
+        const holds = [qqqCanHold, gldCanHold, true];  // CTA 항상 true
         const prices = { [TICKER_QQQ_LV]: qqq_lv_price, [TICKER_GLD_LV]: gld_lv_price, [TICKER_CTA_LV]: cta_price };
         const rebalActions = this._calcRebalanceActions(t, prices, holds);
         actions.push(...rebalActions);
       }
     }
 
-    // [4] 콘탱고 복귀: QQQ_LV 0주인 트렌치 전체에 가중치 비율로 재매수 (리밸런싱 대상 제외)
-    if (!is_backwardation) {
+    // [6] 콘탱고 복귀: QQQ_LV 0주인 트렌치 전체에 가중치 비율로 재매수 (리밸런싱 대상 제외)
+    if (qqqCanHold) {
       for (const t of this.tranches) {
         if (t.tranche_num === rebalTrancheNum) continue;
         if (t.shares[TICKER_QQQ_LV] === 0) {
@@ -295,17 +380,19 @@ export class Algo2QqqGld {
       }
     }
 
-    // [5] TIP 복귀: GLD_LV 0주인 트렌치 전체에 가중치 비율로 재매수 (리밸런싱 대상 제외)
-    for (const t of this.tranches) {
-      if (t.tranche_num === rebalTrancheNum) continue;
-      if (t.shares[TICKER_GLD_LV] === 0) {
-        const tEquity = t.cash + (t.shares[TICKER_QQQ_LV] * qqq_lv_price) + (t.shares[TICKER_CTA_LV] * cta_price);
-        const targetShares = Math.floor(tEquity * this.weights[1] / gld_lv_price);
-        if (targetShares > 0) {
-          actions.push({
-            tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'buy',
-            shares: targetShares, price: gld_lv_price, reason: 'TIP 복귀',
-          });
+    // [7] TIP 복귀: GLD_LV 0주인 트렌치 전체에 가중치 비율로 재매수 (리밸런싱 대상 제외)
+    if (gldCanHold) {
+      for (const t of this.tranches) {
+        if (t.tranche_num === rebalTrancheNum) continue;
+        if (t.shares[TICKER_GLD_LV] === 0) {
+          const tEquity = t.cash + (t.shares[TICKER_QQQ_LV] * qqq_lv_price) + (t.shares[TICKER_CTA_LV] * cta_price);
+          const targetShares = Math.floor(tEquity * this.weights[1] / gld_lv_price);
+          if (targetShares > 0) {
+            actions.push({
+              tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'buy',
+              shares: targetShares, price: gld_lv_price, reason: 'TIP 복귀',
+            });
+          }
         }
       }
     }
@@ -348,18 +435,21 @@ export class Algo2QqqGld {
     const targetTrancheNum = (isoWeek % 4) + 1;
     const isRebalWeek = this.lastRebalIsoWeek !== isoWeek;
 
-    const vixStructure = is_backwardation
+    const vixStructure = this.vix_ts_state === 1
       ? `백워데이션 (VIX=${vix.toFixed(1)} > VIX3M=${vix3m.toFixed(1)})`
       : `콘탱고 (VIX=${vix.toFixed(1)} < VIX3M=${vix3m.toFixed(1)})`;
 
-    const tipStatus = tip_avg_ret < 0 ? '위험' : '정상';
+    const { TIP_BUFFER, VIX_TS_BUFFER, QQQ_MOM_BUFFER, GLD_MOM_BUFFER,
+            TIP_FILTER_ENABLED, VIX_FILTER_ENABLED, QQQ_MOM_FILTER_ENABLED, GLD_MOM_FILTER_ENABLED } = Algo2QqqGld;
+
     let msg = `*QQQ+GLD 트렌치 시그널* (${date})\n\n`;
-    msg += `시그널:\n`;
-    msg += `  VIX 구조: ${vixStructure}\n`;
-    msg += `  TIP 모멘텀: ${(tip_avg_ret * 100).toFixed(1)}% (${tipStatus})\n`;
-    msg += `  QQQ 모멘텀: ${(qqq_mom_avg * 100).toFixed(1)}%\n`;
-    msg += `  GLD 모멘텀: ${(gld_mom_avg * 100).toFixed(1)}%\n`;
-    msg += `  CTA 모멘텀: ${(cta_mom_avg * 100).toFixed(1)}%\n\n`;
+    msg += `필터 상태:\n`;
+    msg += `  TIP: ${this.tip_state} (${(tip_avg_ret*100).toFixed(1)}%, buf:±${(TIP_BUFFER*100).toFixed(1)}%, ${TIP_FILTER_ENABLED?'ON':'OFF'})\n`;
+    msg += `  VIX: ${this.vix_ts_state===0?'contango':'bwd'} (buf:±${(VIX_TS_BUFFER*100).toFixed(1)}%, ${VIX_FILTER_ENABLED?'ON':'OFF'})\n`;
+    msg += `  QQQ모멘텀: ${this.qqq_mom_state} (${(qqq_mom_avg*100).toFixed(1)}%, buf:±${(QQQ_MOM_BUFFER*100).toFixed(1)}%, ${QQQ_MOM_FILTER_ENABLED?'ON':'OFF'})\n`;
+    msg += `  GLD모멘텀: ${this.gld_mom_state} (${(gld_mom_avg*100).toFixed(1)}%, buf:±${(GLD_MOM_BUFFER*100).toFixed(1)}%, ${GLD_MOM_FILTER_ENABLED?'ON':'OFF'})\n`;
+    msg += `  CTA 모멘텀: ${(cta_mom_avg * 100).toFixed(1)}%\n`;
+    msg += `  VIX 구조: ${vixStructure}\n\n`;
 
     if (isRebalWeek) {
       msg += `금주 리밸런싱: 트렌치 #${targetTrancheNum} (ISO week ${isoWeek} % 4 = ${isoWeek % 4})\n\n`;
@@ -414,6 +504,10 @@ export class Algo2QqqGld {
       },
       pending_actions: this._normalizePendingActions(this.pendingActions),
       weights: this.weights,
+      tip_state: this.tip_state,
+      vix_ts_state: this.vix_ts_state,
+      qqq_mom_state: this.qqq_mom_state,
+      gld_mom_state: this.gld_mom_state,
       updated_at: new Date().toISOString(),
     };
     await setTradeStatus('qqq_gld', shared);
@@ -427,10 +521,12 @@ export class Algo2QqqGld {
   /** ta status 용 한 줄 요약 */
   getStatusSummary() {
     const totalEquity = this.tranches.reduce((s, t) => s + t.equity, 0);
+    const vixStr = this.vix_ts_state === 0 ? 'cont' : 'bwd';
     let msg = `  총자산: $${totalEquity.toFixed(0)}, 트렌치 ${this.tranches.length}개\n`;
     if (this.weights) {
       msg += `  가중치: ${(this.weights[0]*100).toFixed(0)}/${(this.weights[1]*100).toFixed(0)}/${(this.weights[2]*100).toFixed(0)}\n`;
     }
+    msg += `  필터: TIP=${this.tip_state} VIX=${vixStr} QQQmom=${this.qqq_mom_state} GLDmom=${this.gld_mom_state}\n`;
     return msg;
   }
 
@@ -466,13 +562,19 @@ export class Algo2QqqGld {
     }
     result += `  합계: $${totalEquity.toFixed(0)}\n`;
 
+    const { TIP_BUFFER, VIX_TS_BUFFER, QQQ_MOM_BUFFER, GLD_MOM_BUFFER,
+            TIP_FILTER_ENABLED, VIX_FILTER_ENABLED, QQQ_MOM_FILTER_ENABLED, GLD_MOM_FILTER_ENABLED } = Algo2QqqGld;
+    const vixStateStr = this.vix_ts_state === 0 ? 'contango' : 'bwd';
+    result += `\n필터 상태:\n`;
+    result += `  TIP: ${this.tip_state} (buf:±${(TIP_BUFFER*100).toFixed(1)}%, ${TIP_FILTER_ENABLED?'ON':'OFF'})\n`;
+    result += `  VIX: ${vixStateStr} (buf:±${(VIX_TS_BUFFER*100).toFixed(1)}%, ${VIX_FILTER_ENABLED?'ON':'OFF'})\n`;
+    result += `  QQQ모멘텀: ${this.qqq_mom_state} (buf:±${(QQQ_MOM_BUFFER*100).toFixed(1)}%, ${QQQ_MOM_FILTER_ENABLED?'ON':'OFF'})\n`;
+    result += `  GLD모멘텀: ${this.gld_mom_state} (buf:±${(GLD_MOM_BUFFER*100).toFixed(1)}%, ${GLD_MOM_FILTER_ENABLED?'ON':'OFF'})\n`;
+
     if (this.lastSignals) {
       const s = this.lastSignals;
-      const vixStr = s.is_backwardation ? '백워데이션 (VIX > VIX3M)' : '콘탱고 (VIX < VIX3M)';
-      const tipStatus = s.tip_avg_ret < 0 ? '위험' : '정상';
       result += `\n시그널 (${s.date}):\n`;
-      result += `  VIX 구조: ${vixStr}\n`;
-      result += `  TIP: ${(s.tip_avg_ret * 100).toFixed(1)}% (${tipStatus})\n`;
+      result += `  TIP: ${(s.tip_avg_ret * 100).toFixed(1)}%\n`;
       result += `  QQQ: ${(s.qqq_mom_avg * 100).toFixed(1)}%\n`;
       result += `  GLD: ${(s.gld_mom_avg * 100).toFixed(1)}%\n`;
       result += `  CTA: ${(s.cta_mom_avg * 100).toFixed(1)}%\n`;
