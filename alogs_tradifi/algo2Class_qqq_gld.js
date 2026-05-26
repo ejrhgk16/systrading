@@ -116,6 +116,7 @@ export class Algo2QqqGld {
       consoleLogger.info(`${this.name} 시그널:`, indicators);
 
       const actions = this.determineActions(indicators);
+      await this._mergePendingActions(actions);
 
       // equity 갱신
       const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
@@ -226,6 +227,32 @@ export class Algo2QqqGld {
 
   _setPendingActions(actions) {
     this.pendingActions = this._normalizePendingActions(actions);
+    return this.pendingActions;
+  }
+
+  /**
+   * 새 액션을 기존 pendingActions에 병합 (dedup key: tranche_num + ticker)
+   * 같은 (tranche_num, ticker) 쌍은 새 액션으로 대체, 나머지는 유지
+   */
+  async _mergePendingActions(newActions) {
+    const normalized = this._normalizePendingActions(newActions);
+    if (normalized.length === 0) return this.pendingActions;
+
+    // dedup key 기준으로 기존 pendingActions에서 제거할 인덱스 수집
+    const keysToReplace = new Set();
+    for (const a of normalized) {
+      keysToReplace.add(`${a.tranche_num}_${a.ticker}`);
+    }
+
+    // 같은 (tranche_num, ticker) 제외하고 기존 pendingActions 유지
+    this.pendingActions = this.pendingActions.filter(
+      existing => !keysToReplace.has(`${existing.tranche_num}_${existing.ticker}`)
+    );
+
+    // 새 액션 추가
+    this.pendingActions.push(...normalized);
+
+    await this._savePendingActions();
     return this.pendingActions;
   }
 
@@ -418,7 +445,7 @@ export class Algo2QqqGld {
       }
     }
 
-    return this._setPendingActions(actions);
+    return actions;
   }
 
   _calcRebalanceActions(tranche, prices, holds) {
@@ -718,6 +745,7 @@ export class Algo2QqqGld {
 
     const indicators = await this.fetchIndicators();
     const actions = this.determineActions(indicators);
+    await this._mergePendingActions(actions);
     const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
 
     for (const t of this.tranches) {

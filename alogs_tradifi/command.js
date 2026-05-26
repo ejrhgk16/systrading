@@ -1,5 +1,6 @@
 import { fetchTodayOpenPrices, buildNetSummary } from './tradifi_utils.js';
 import { registerCommand } from '../common/cli.js';
+import { getTradeStatus } from '../db/firestoreFunc.js';
 
 /**
  * Tradifi 커맨드 등록 (ta / ta2 / qg / ta3)
@@ -8,10 +9,10 @@ import { registerCommand } from '../common/cli.js';
 export function registerTradifiCommands(strategies) {
 
   // ── ta (통합) ─────────────────────────────────────────────────
-  registerCommand('ta', (subCmd) => {
+  registerCommand('ta', async (subCmd) => {
     if (subCmd === 'status')  return cmdTaStatus(strategies);
-    if (subCmd === 'pending') return cmdTaPending(strategies);
-    if (subCmd === 'confirm') return cmdTaConfirm(strategies);
+    if (subCmd === 'pending') return await cmdTaPending(strategies);
+    if (subCmd === 'confirm') return await cmdTaConfirm(strategies);
     return 'ta [status|pending|confirm]';
   });
 
@@ -55,15 +56,16 @@ function cmdTaStatus(strategies) {
   return msg;
 }
 
-function cmdTaPending(strategies) {
-  const allActions = collectAllActions(strategies);
+async function cmdTaPending(strategies) {
+  const allActions = await collectAllActions(strategies);
   if (allActions.length === 0) return '대기 액션 없음';
 
   let msg = '=== Tradifi 대기 액션 ===\n\n';
-  for (const [name, s] of Object.entries(strategies)) {
-    if (s.pendingActions.length === 0) continue;
+  for (const [name] of Object.entries(strategies)) {
+    const actions = allActions.filter(a => a.source === name);
+    if (actions.length === 0) continue;
     msg += `[${name}]\n`;
-    s.pendingActions.forEach((a) => {
+    actions.forEach((a) => {
       const kr     = a.action === 'buy' ? '매수' : '매도';
       const prefix = a.tranche_num ? `트렌치#${a.tranche_num} ` : '';
       msg += `  ${prefix}${a.ticker} ${kr} ${a.shares}주 @ ~$${a.price.toFixed(2)} (${a.reason})\n`;
@@ -74,8 +76,8 @@ function cmdTaPending(strategies) {
   return msg;
 }
 
-function cmdTaConfirm(strategies) {
-  const allActions = collectAllActions(strategies);
+async function cmdTaConfirm(strategies) {
+  const allActions = await collectAllActions(strategies);
   if (allActions.length === 0) return '대기 액션 없음';
 
   let prompt = '=== 대기 액션 ===\n';
@@ -143,11 +145,22 @@ function cmdTaConfirm(strategies) {
 
 // ─── 유틸 ─────────────────────────────────────────────────────
 
-/** 모든 전략의 pendingActions를 source 태깅해서 합침 */
-function collectAllActions(strategies) {
+/** 모든 전략의 pendingActions를 Firestore에서 읽어 source 태깅해서 합침 */
+async function collectAllActions(strategies) {
+  const docIds = { ta2: 'qqq_gld', ta3: 'mean_rev_qqq' };
   const all = [];
   for (const [name, s] of Object.entries(strategies)) {
-    for (const a of s.pendingActions) {
+    const docId = docIds[name];
+    if (!docId) continue;
+    let pendingActions = [];
+    try {
+      const data = await getTradeStatus(docId);
+      pendingActions = data?.pending_actions || [];
+    } catch (e) {
+      // Firestore 실패 시 in-memory fallback
+      pendingActions = s.pendingActions || [];
+    }
+    for (const a of pendingActions) {
       all.push({ ...a, source: name, strategy: s, _original: a });
     }
   }

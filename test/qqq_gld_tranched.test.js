@@ -746,6 +746,9 @@ console.log('\n[Test 33] scheduleFunc — pendingActions > 0 → Telegram 알림
     qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30, vix: 15, vix3m: 20, date: '2026-05-21',
   });
 
+  // determineActions mock — merge 사이드이펙트 방지
+  algo.determineActions = () => [];
+
   // sendSignalTelegram mock (실제 Telegram 발송 방지)
   algo.sendSignalTelegram = async () => {};
   // saveState mock (Firestore 호출 방지)
@@ -780,6 +783,7 @@ console.log('\n[Test 34] scheduleFunc — pendingActions = 0 → 알림 없음')
     is_backwardation: false, tip_avg_ret: 0.02, qqq_mom_avg: 0.05, gld_mom_avg: 0.03, cta_mom_avg: 0.05,
     qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30, vix: 15, vix3m: 20, date: '2026-05-21',
   });
+  algo.determineActions = () => [];
   algo.sendSignalTelegram = async () => {};
   algo.saveState = async () => {};
 
@@ -798,6 +802,78 @@ console.log('\n[Test 34] scheduleFunc — pendingActions = 0 → 알림 없음')
   } finally {
     consoleLogger.info = origInfo;
   }
+}
+
+
+// ─── Test 35: _mergePendingActions — 기존 pending 보존 (신규 다른 키) ──
+console.log('\n[Test 35] _mergePendingActions — 기존 pending 보존 (신규 다른 키)');
+{
+  const algo = createTestInstance();
+  algo._savePendingActions = async () => {};
+
+  algo.pendingActions = [{ tranche_num: 1, ticker: 'TQQQ', action: 'buy', shares: 10, price: 80.50, reason: 'test' }];
+  const newActions = [{ tranche_num: 2, ticker: 'UGL', action: 'sell', shares: 5, price: 45.20, reason: 'new' }];
+
+  await algo._mergePendingActions(newActions);
+
+  assert(algo.pendingActions.length === 2, `pendingActions.length = ${algo.pendingActions.length} (expected 2)`);
+  assert(algo.pendingActions.some(a => a.tranche_num === 1 && a.ticker === 'TQQQ'), '기존 액션 유지 (트렌치#1 TQQQ)');
+  assert(algo.pendingActions.some(a => a.tranche_num === 2 && a.ticker === 'UGL'), '신규 액션 추가 (트렌치#2 UGL)');
+}
+
+
+// ─── Test 36: _mergePendingActions — 동일 (트렌치, 티커) 신규가 기존 대체 ──
+console.log('\n[Test 36] _mergePendingActions — 동일 (트렌치, 티커) 신규가 기존 대체');
+{
+  const algo = createTestInstance();
+  algo._savePendingActions = async () => {};
+
+  algo.pendingActions = [{ tranche_num: 1, ticker: 'TQQQ', action: 'buy', shares: 10, price: 80, reason: 'old' }];
+  const newActions = [{ tranche_num: 1, ticker: 'TQQQ', action: 'sell', shares: 5, price: 82, reason: 'new' }];
+
+  await algo._mergePendingActions(newActions);
+
+  assert(algo.pendingActions.length === 1, `pendingActions.length = ${algo.pendingActions.length} (expected 1)`);
+  const a = algo.pendingActions[0];
+  assert(a.action === 'sell', `action = ${a.action} (expected 'sell')`);
+  assert(a.shares === 5, `shares = ${a.shares} (expected 5)`);
+  assert(a.price === 82, `price = ${a.price} (expected 82)`);
+  assert(a.reason === 'new', `reason = ${a.reason} (expected 'new')`);
+}
+
+
+// ─── Test 37: _mergePendingActions — 신규 빈 배열 → 기존 보존 ──
+console.log('\n[Test 37] _mergePendingActions — 신규 빈 배열 → 기존 보존');
+{
+  const algo = createTestInstance();
+  algo._savePendingActions = async () => {};
+
+  algo.pendingActions = [{ tranche_num: 1, ticker: 'TQQQ', action: 'buy', shares: 10, price: 80.50, reason: 'test' }];
+  const newActions = [];
+
+  await algo._mergePendingActions(newActions);
+
+  assert(algo.pendingActions.length === 1, `pendingActions.length = ${algo.pendingActions.length} (expected 1)`);
+  assert(algo.pendingActions[0].tranche_num === 1 && algo.pendingActions[0].ticker === 'TQQQ', '기존 액션 유지');
+}
+
+
+// ─── Test 38: _mergePendingActions — 완전 replace (신규가 기존과 동일 키) ──
+console.log('\n[Test 38] _mergePendingActions — 완전 replace (신규가 기존과 동일 키)');
+{
+  const algo = createTestInstance();
+  algo._savePendingActions = async () => {};
+
+  algo.pendingActions = [{ tranche_num: 1, ticker: 'TQQQ', action: 'buy', shares: 10, price: 80, reason: 'old' }];
+  const newActions = [{ tranche_num: 1, ticker: 'TQQQ', action: 'buy', shares: 20, price: 85, reason: 'updated' }];
+
+  await algo._mergePendingActions(newActions);
+
+  assert(algo.pendingActions.length === 1, `pendingActions.length = ${algo.pendingActions.length} (expected 1)`);
+  const a = algo.pendingActions[0];
+  assert(a.shares === 20, `shares = ${a.shares} (expected 20)`);
+  assert(a.price === 85, `price = ${a.price} (expected 85)`);
+  assert(a.reason === 'updated', `reason = ${a.reason} (expected 'updated')`);
 }
 
 

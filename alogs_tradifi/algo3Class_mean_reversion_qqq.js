@@ -63,8 +63,9 @@ export class Algo3MeanReversionQqq {
       if (data.position)        this.position        = data.position;
       if (data.vix_regime)      this.vix_regime      = data.vix_regime;
       if (data.last_indicators) this.last_indicators = data.last_indicators;
+      if (data.pending_actions) this.pendingActions   = data.pending_actions;
 
-      // 재시작 후 pending_slot이 있으면 pendingActions 복원
+      // 재시작 후 pending_slot이 있으면 pendingActions 복원 (Firestore에 없을 때 fallback)
       if (this.position.pending_slot !== null && this.last_indicators) {
         const slotIdx = this.position.pending_slot - 1;
         const ratio   = Algo3MeanReversionQqq.SLOT_SIZE_RATIOS[slotIdx];
@@ -109,6 +110,7 @@ export class Algo3MeanReversionQqq {
       indicators.bb_lower_exit   = bb1.middle - bb_std * exit_std;
 
       const actions = this.determineActions(indicators);
+      await this._mergePendingActions(actions);
 
       await this.saveState(indicators);
 
@@ -209,7 +211,6 @@ export class Algo3MeanReversionQqq {
           price:  tqqq_close,
           reason: 'BB exit',
         });
-        this.pendingActions = actions;
         return actions;
       }
 
@@ -260,14 +261,62 @@ export class Algo3MeanReversionQqq {
       }
     }
 
-    this.pendingActions = actions;
     return actions;
+  }
+
+  /**
+   * 새 액션을 pendingActions에 병합 (ticker 기준 dedup)
+   * - 동일 ticker의 기존 액션 제거 후 새 액션 추가
+   * - merge 후 Firestore에 저장
+   * @param {Array} newActions - 추가할 액션 배열
+   */
+  async _mergePendingActions(newActions) {
+    const dedupTickers = new Set(newActions.map(a => a.ticker));
+
+    // 기존 pendingActions 중 dedup 대상(ticker)이 아닌 것만 유지
+    const remaining = this.pendingActions.filter(a => !dedupTickers.has(a.ticker));
+
+    // 유지분 + 새 액션
+    this.pendingActions = [...remaining, ...newActions];
+
+    // Firestore 동기화
+    await setTradeStatus(Algo3MeanReversionQqq.DOC_ID, {
+      pending_actions: this.pendingActions,
+      updated_at: new Date().toISOString(),
+    }, true);
+  }
+
+  async clearPendingActions() {
+    this.pendingActions = [];
+    await setTradeStatus(Algo3MeanReversionQqq.DOC_ID, {
+      pending_actions: [],
+      updated_at: new Date().toISOString(),
+    }, true);
+  }
+
+  async removePendingAction(action) {
+    const before = this.pendingActions.length;
+    const target = action._original ?? action;
+    this.pendingActions = this.pendingActions.filter((pending) =>
+      pending.ticker !== target.ticker ||
+      pending.action !== target.action ||
+      pending.shares !== target.shares ||
+      pending.price !== target.price ||
+      pending.reason !== target.reason
+    );
+    if (this.pendingActions.length !== before) {
+      await setTradeStatus(Algo3MeanReversionQqq.DOC_ID, {
+        pending_actions: this.pendingActions,
+        updated_at: new Date().toISOString(),
+      }, true);
+    }
   }
 
   async saveState(indicators) {
     const data = {
       capital:  this.capital,
       position: this.position,
+      pending_actions: this.pendingActions,
       vix_regime: this.vix_regime,
       last_indicators: {
         bb_mid:         indicators.bb_mid,
