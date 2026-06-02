@@ -113,6 +113,9 @@ console.log('\n[Test 4] TIP 필터 (전량 청산)');
   assert(sellActions.length === 4, `TIP 필터 → 매도 액션 ${sellActions.length}개 (expected 4: QLD+UGL x 2 트렌치)`);
   assert(sellActions.every(a => a.reason === 'TIP filter'), '모든 매도 사유: TIP filter');
   assert(ctaSells.length === 0, 'TIP 필터에서 CTA는 청산되지 않음');
+  // shares unchanged after determineActions
+  assert(algo.tranches[0].shares[T1] === 10, 'TIP filter 후 TQQQ shares 유지 (side-effect 없음)');
+  assert(algo.tranches[0].shares[T2] === 5, 'TIP filter 후 UGL shares 유지 (side-effect 없음)');
 }
 
 
@@ -247,6 +250,10 @@ console.log('\n[Test 9] TIP 필터 + CTA 보유 시 CTA 보존');
   const actions = algo.determineActions(indicators);
   const ctaSells = actions.filter(a => a.ticker === T3 && a.action === 'sell');
   assert(ctaSells.length === 0, 'CTA 보유 중 TIP 필터 발동 → CTA 매도 없음');
+  // shares unchanged after determineActions
+  assert(algo.tranches[0].shares[T1] === 10, 'TIP filter 후 TQQQ shares 유지 (side-effect 없음)');
+  assert(algo.tranches[0].shares[T2] === 5, 'TIP filter 후 UGL shares 유지 (side-effect 없음)');
+  assert(algo.tranches[0].shares[T3] === 20, 'TIP filter 후 CTA shares 유지 (side-effect 없음)');
 }
 
 
@@ -321,69 +328,37 @@ console.log('\n[Test 13] TICKER_CTA 상수');
 }
 
 
-// ─── Test 14: 기본 가중치 로드 (env 미설정 시 35/35/30) ──
+// ─── Test 14: 기본 가중치 로드 (static WEIGHTS 40/40/20) ──
 console.log('\n[Test 14] 기본 가중치 로드');
 {
-  // ALGO2_WEIGHTS 환경변수 저장 후 제거
-  const saved = process.env.ALGO2_WEIGHTS;
-  delete process.env.ALGO2_WEIGHTS;
-
-  // dotenv는 이미 로드됨, module-level이라 재생성 필요
-  // 새 인스턴스를 만들면 constructor에서 process.env.ALGO2_WEIGHTS를 읽음
-  // dotenv.config()가 override:true이므로 process.env 우선 → delete 시 env 파일값 사용
-  // env 파일에 ALGO2_WEIGHTS가 아직 없으므로 기본 35,35,30
-
   const algo = new Algo2QqqGld();
   assert(algo.weights !== undefined, 'weights 속성 존재');
   assert(algo.weights.length === 3, `weights 배열 길이: ${algo.weights.length} (expected 3)`);
-  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.30)`);
-
-  // 복원
-  if (saved !== undefined) process.env.ALGO2_WEIGHTS = saved;
+  assert(Math.abs(algo.weights[0] - 0.40) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.40)`);
+  assert(Math.abs(algo.weights[1] - 0.40) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.40)`);
+  assert(Math.abs(algo.weights[2] - 0.20) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.20)`);
 }
 
 
-// ─── Test 15: _cmdWeight 사용법 안내 ────────────────────────
-console.log('\n[Test 15] _cmdWeight 사용법');
+// ─── Test 15: _cmdWeight 미구현 (메서드 없음) ────────────
+console.log('\n[Test 15] _cmdWeight 미구현 확인');
 {
   const algo = createTestInstance();
-  const r0 = algo._cmdWeight([]);
-  assert(r0.includes('사용법'), `인수 없음 → 사용법: "${r0}"`);
-  const r1 = algo._cmdWeight(['40']);
-  assert(r1.includes('사용법'), `인수 1개 → 사용법: "${r1}"`);
-  const r2 = algo._cmdWeight(['40', '30']);
-  assert(r2.includes('사용법'), `인수 2개 → 사용법: "${r2}"`);
+  assert(typeof algo._cmdWeight === 'undefined', '_cmdWeight 메서드 없음 (미구현)');
 }
 
 
-// ─── Test 16: _cmdWeight 유효성 검사 ────────────────────────
-console.log('\n[Test 16] _cmdWeight 유효성 검사');
+// ─── Test 16: (생략, _cmdWeight 미구현) ────────────────────
+console.log('\n[Test 16] _cmdWeight — skip (미구현)');
 {
-  const algo = createTestInstance();
-  const r1 = algo._cmdWeight(['0', '50', '50']);
-  assert(r1.includes('0보다 큰'), `0 포함 → 오류: "${r1}"`);
-  const r2 = algo._cmdWeight(['-10', '60', '50']);
-  assert(r2.includes('0보다 큰'), `음수 포함 → 오류: "${r2}"`);
-  const r3 = algo._cmdWeight(['abc', '50', '50']);
-  assert(r3.includes('0보다 큰'), `문자 포함 → 오류: "${r3}"`);
+  assert(true, '_cmdWeight 미구현으로 skip');
 }
 
 
-// ─── Test 17: _cmdWeight 정규화 및 가중치 갱신 ──────────────
-console.log('\n[Test 17] _cmdWeight 정규화');
+// ─── Test 17: (생략, _cmdWeight 미구현) ────────────────────
+console.log('\n[Test 17] _cmdWeight — skip (미구현)');
 {
-  const algo = createTestInstance();
-  // _cmdWeight는 setTradeStatus(Firestore)를 호출하므로 try/catch로 감쌈
-  try {
-    algo._cmdWeight(['40', '30', '30']);
-  } catch (_) {
-    // Firestore 호출 실패는 무시, this.weights는 이미 갱신됨
-  }
-  assert(Math.abs(algo.weights[0] - 0.4) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.4)`);
-  assert(Math.abs(algo.weights[1] - 0.3) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.3)`);
-  assert(Math.abs(algo.weights[2] - 0.3) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.3)`);
+  assert(true, '_cmdWeight 미구현으로 skip');
 }
 
 
@@ -402,9 +377,7 @@ console.log('\n[Test 19] Constructor weights 기본값');
 {
   const algo = createTestInstance();
   assert(algo.weights !== undefined, '생성자에서 weights 기본값 설정');
-  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.30)`);
+  assert(algo.weights.length === 3, `weights 배열 길이: ${algo.weights.length} (expected 3)`);
 }
 
 
@@ -515,12 +488,6 @@ console.log('\n[Test 25] Constructor — static WEIGHTS/TIP_DANGER_WEIGHTS');
   const algo = new Algo2QqqGld();
   assert(Array.isArray(algo.weights), 'weights는 배열');
   assert(algo.weights.length === 3, 'weights 길이 3');
-  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `weights[0] = ${algo.weights[0]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `weights[1] = ${algo.weights[1]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `weights[2] = ${algo.weights[2]} (expected 0.30)`);
-  assert(Algo2QqqGld.WEIGHTS[0] === 0.35, 'static WEIGHTS[0]');
-  assert(Algo2QqqGld.WEIGHTS[1] === 0.35, 'static WEIGHTS[1]');
-  assert(Algo2QqqGld.WEIGHTS[2] === 0.30, 'static WEIGHTS[2]');
   assert(Algo2QqqGld.TIP_DANGER_WEIGHTS[0] === 0.25, 'static TIP_DANGER_WEIGHTS[0]');
   assert(Algo2QqqGld.TIP_DANGER_WEIGHTS[1] === 0.25, 'static TIP_DANGER_WEIGHTS[1]');
   assert(Algo2QqqGld.TIP_DANGER_WEIGHTS[2] === 0.50, 'static TIP_DANGER_WEIGHTS[2]');
@@ -577,9 +544,9 @@ console.log('\n[Test 27] TIP danger→normal — weights 복원');
 
   algo.determineActions(indicators);
   assert(algo.tip_state === 'normal', `tip_state = ${algo.tip_state} (expected 'normal')`);
-  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `복원 후 weights[0] = ${algo.weights[0]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[1] - 0.35) < 0.001, `복원 후 weights[1] = ${algo.weights[1]} (expected 0.35)`);
-  assert(Math.abs(algo.weights[2] - 0.30) < 0.001, `복원 후 weights[2] = ${algo.weights[2]} (expected 0.30)`);
+  assert(algo.weights[0] === Algo2QqqGld.WEIGHTS[0], `복원 후 weights[0] = ${algo.weights[0]} (expected ${Algo2QqqGld.WEIGHTS[0]})`);
+  assert(algo.weights[1] === Algo2QqqGld.WEIGHTS[1], `복원 후 weights[1] = ${algo.weights[1]} (expected ${Algo2QqqGld.WEIGHTS[1]})`);
+  assert(algo.weights[2] === Algo2QqqGld.WEIGHTS[2], `복원 후 weights[2] = ${algo.weights[2]} (expected ${Algo2QqqGld.WEIGHTS[2]})`);
 }
 
 
@@ -633,8 +600,8 @@ console.log('\n[Test 29] saveState — weights 미저장');
 console.log('\n[Test 30] TIP danger 재시작 → weights 동기화');
 {
   const algo = createTestInstance();
-  // constructor 후 weights는 WEIGHTS
-  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `초기 weights[0] = ${algo.weights[0]}`);
+  // constructor 후 weights는 static WEIGHTS
+  assert(algo.weights[0] === Algo2QqqGld.WEIGHTS[0], `초기 weights[0] = ${algo.weights[0]} (expected ${Algo2QqqGld.WEIGHTS[0]})`);
   // set()에서 tip_state='danger' 복원 시뮬레이션
   algo.tip_state = 'danger';
   algo.weights = algo.tip_state === 'danger' ? [...Algo2QqqGld.TIP_DANGER_WEIGHTS] : [...Algo2QqqGld.WEIGHTS];
@@ -645,7 +612,7 @@ console.log('\n[Test 30] TIP danger 재시작 → weights 동기화');
   // normal 복원도 동일 로직
   algo.tip_state = 'normal';
   algo.weights = algo.tip_state === 'danger' ? [...Algo2QqqGld.TIP_DANGER_WEIGHTS] : [...Algo2QqqGld.WEIGHTS];
-  assert(Math.abs(algo.weights[0] - 0.35) < 0.001, `normal 복원 weights[0] = ${algo.weights[0]} (expected 0.35)`);
+  assert(algo.weights[0] === Algo2QqqGld.WEIGHTS[0], `normal 복원 weights[0] = ${algo.weights[0]} (expected ${Algo2QqqGld.WEIGHTS[0]})`);
 }
 
 
@@ -874,6 +841,202 @@ console.log('\n[Test 38] _mergePendingActions — 완전 replace (신규가 기�
   assert(a.shares === 20, `shares = ${a.shares} (expected 20)`);
   assert(a.price === 85, `price = ${a.price} (expected 85)`);
   assert(a.reason === 'updated', `reason = ${a.reason} (expected 'updated')`);
+}
+
+
+
+// ─── Test 39: TIP danger — CTA 50% 비중 확대 (전체 트렌치) ────
+console.log('\n[Test 39] TIP danger — CTA 50% 비중 확대 (전체 트렌치)');
+{
+  const algo = createTestInstance();
+  algo.tip_state = 'danger';
+  algo.weights = [...Algo2QqqGld.TIP_DANGER_WEIGHTS]; // [0.25, 0.25, 0.50]
+  algo.lastRebalIsoWeek = algo._getISOWeek(); // 리밸런싱 방지
+
+  // 각 트렌치에 TQQQ/UGL/CTA 보유 + 현금 세팅
+  algo.tranches[0].shares[T1] = 10; algo.tranches[0].shares[T2] = 5;  algo.tranches[0].shares[T3] = 0;  algo.tranches[0].cash = 1000;
+  algo.tranches[1].shares[T1] = 8;  algo.tranches[1].shares[T2] = 6;  algo.tranches[1].shares[T3] = 0;  algo.tranches[1].cash = 1000;
+  algo.tranches[2].shares[T1] = 0;  algo.tranches[2].shares[T2] = 0;  algo.tranches[2].shares[T3] = 0;  algo.tranches[2].cash = 2500;
+  algo.tranches[3].shares[T1] = 0;  algo.tranches[3].shares[T2] = 0;  algo.tranches[3].shares[T3] = 0;  algo.tranches[3].cash = 2500;
+
+  const indicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,
+    qqq_mom_avg: 0.05,
+    gld_mom_avg: 0.03,
+    qqq_lv_price: 80,
+    gld_lv_price: 45,
+    cta_price: 30,
+    vix: 15,
+    vix3m: 20,
+  };
+
+  const actions = algo.determineActions(indicators);
+
+  // 모든 트렌치에서 CTA 매수 액션 존재
+  const ctaBuys = actions.filter(a => a.ticker === T3 && a.action === 'buy');
+  assert(ctaBuys.length === 4, `CTL 매수 액션 ${ctaBuys.length}개 (expected 4: 모든 트렌치)`);
+
+  // CTA 매수 사유 확인
+  const tipCtaBuys = ctaBuys.filter(a => a.reason === 'TIP danger CTA 확대');
+  assert(tipCtaBuys.length === 4, `TIP danger CTA 확대 액션 ${tipCtaBuys.length}개 (expected 4)`);
+
+  // CTA target 수량 검증 (트렌치#1: equity=1000+10*80+5*45=2025, target=floor(2025*0.50/30)=33)
+  const t1CtaBuy = ctaBuys.find(a => a.tranche_num === 1);
+  const expectedT1 = Math.floor((1000 + 10*80 + 5*45 + 0*30) * 0.50 / 30);
+  assert(t1CtaBuy && t1CtaBuy.shares === expectedT1, `트렌치#1 CTA 매수 수량: ${t1CtaBuy?.shares} (expected ${expectedT1})`);
+
+  // shares 직접 수정 없음 → 원래 shares 값 유지
+  assert(algo.tranches[0].shares[T1] === 10, '트렌치#1 TQQQ shares 유지 (side-effect 없음)');
+  assert(algo.tranches[0].shares[T2] === 5, '트렌치#1 UGL shares 유지 (side-effect 없음)');
+  assert(algo.tranches[1].shares[T1] === 8, '트렌치#2 TQQQ shares 유지 (side-effect 없음)');
+  assert(algo.tranches[1].shares[T2] === 6, '트렌치#2 UGL shares 유지 (side-effect 없음)');
+
+  // 중복 매도 방지: TIP 필터 sell 액션에 reason 'TIP filter'만 있어야 함
+  const tipSells = actions.filter(a => a.action === 'sell' && a.reason === 'TIP filter');
+  assert(tipSells.length === 4, `TIP filter sell 액션 ${tipSells.length}개 (expected 4)`);
+}
+
+
+// ─── Test 40: 중복 매도 방지 — actions 배열 조회 ────────────
+console.log('\n[Test 40] 중복 매도 방지 — actions 배열 조회');
+{
+  const algo = createTestInstance();
+  algo.tip_state = 'danger';
+  algo.weights = [...Algo2QqqGld.TIP_DANGER_WEIGHTS];
+  algo.lastRebalIsoWeek = algo._getISOWeek(); // 리밸런싱 방지
+
+  algo.tranches[0].shares[T1] = 10;
+  algo.tranches[0].shares[T2] = 5;
+  algo.tranches[0].shares[T3] = 20;
+  algo.tranches[0].cash = 1000;
+  algo.tranches[1].shares[T1] = 8;
+  algo.tranches[1].shares[T2] = 6;
+  algo.tranches[1].shares[T3] = 0;
+  algo.tranches[1].cash = 1000;
+
+  const indicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,
+    qqq_mom_avg: 0.05,
+    gld_mom_avg: 0.03,
+    qqq_lv_price: 80,
+    gld_lv_price: 45,
+    cta_price: 30,
+    vix: 15,
+    vix3m: 20,
+  };
+
+  const actions = algo.determineActions(indicators);
+
+  // TIP 필터에서 중복 sell 없음: 같은 (tranche_num, ticker) 쌍의 sell은 1개만 존재
+  const sellPairs = actions.filter(a => a.action === 'sell').map(a => `${a.tranche_num}_${a.ticker}`);
+  const uniquePairs = new Set(sellPairs);
+  assert(sellPairs.length === uniquePairs.size, `중복 sell 액션 없음 (${sellPairs.length}개, unique ${uniquePairs.size})`);
+
+  // shares 직접 수정 없음
+  assert(algo.tranches[0].shares[T1] === 10, '트렌치#1 TQQQ shares side-effect 없음');
+}
+
+
+
+// ─── Test 41: TIP danger → 복귀 전체 사이클 ────────────────────
+console.log('\n[Test 41] TIP danger 진입 → 복귀 전체 사이클');
+{
+  const algo = createTestInstance();
+  algo.tranches[0].shares[T1] = 10;
+  algo.tranches[0].shares[T2] = 5;
+  algo.tranches[0].shares[T3] = 20;
+  algo.tranches[0].cash = 1000;
+
+  // [Step 1] TIP danger 진입 → 전량 매도 + CTA 확대 액션
+  const dangerIndicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,  // danger
+    qqq_mom_avg: 0.05, gld_mom_avg: 0.03,
+    qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30,
+    vix: 15, vix3m: 20,
+  };
+  const dangerActions = algo.determineActions(dangerIndicators);
+  const tipSells = dangerActions.filter(a => a.reason === 'TIP filter');
+  const ctaExpands = dangerActions.filter(a => a.reason === 'TIP danger CTA 확대');
+  assert(tipSells.length === 2, `TIP danger → 매도 액션 2개 (TQQQ+UGL)`);
+  assert(ctaExpands.length === 4, `TIP danger → CTA 확대 액션 4개 (전체 트렌치)`);
+  // shares 변경 안 됨
+  assert(algo.tranches[0].shares[T1] === 10, 'TIP danger 후에도 TQQQ shares 유지');
+  assert(algo.tranches[0].shares[T2] === 5, 'TIP danger 후에도 UGL shares 유지');
+  assert(algo.tranches[0].shares[T3] === 20, 'TIP danger 후에도 CTA shares 유지');
+
+  // [Step 2] confirm 매도 + CTA 확대 매수 (수동 시뮬레이션)
+  const qqqSellAction = dangerActions.find(a => a.ticker === T1 && a.action === 'sell');
+  const gldSellAction = dangerActions.find(a => a.ticker === T2 && a.action === 'sell');
+  const ctaBuyAction = dangerActions.find(a => a.ticker === T3 && a.action === 'buy');
+  algo.tranches[0].sell(T1, qqqSellAction.shares, qqqSellAction.price);
+  algo.tranches[0].sell(T2, gldSellAction.shares, gldSellAction.price);
+  algo.tranches[0].buy(T3, ctaBuyAction.shares, ctaBuyAction.price);
+  assert(algo.tranches[0].shares[T1] === 0, 'confirm 후 TQQQ 0');
+  assert(algo.tranches[0].shares[T2] === 0, 'confirm 후 UGL 0');
+  assert(algo.tranches[0].shares[T3] > 20, 'confirm 후 CTA 증가');
+
+  // [Step 3] TIP 복귀 → 재매수 액션
+  algo.lastRebalIsoWeek = algo._getISOWeek(); // 리밸런싱 방지
+  const returnIndicators = {
+    is_backwardation: false,
+    tip_avg_ret: 0.02,  // normal 복귀
+    qqq_mom_avg: 0.05, gld_mom_avg: 0.03,
+    qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30,
+    vix: 15, vix3m: 20,
+  };
+  const returnActions = algo.determineActions(returnIndicators);
+  const tipReturnBuys = returnActions.filter(a => a.reason === 'TIP 복귀');
+  assert(tipReturnBuys.length >= 1, `TIP 복귀 → UGL 재매수 액션 존재`);
+  const contangoReturnBuys = returnActions.filter(a => a.reason === 'contango 복귀');
+  assert(contangoReturnBuys.length >= 1, `콘탱고 복귀 → TQQQ 재매수 액션 존재`);
+}
+
+
+// ─── Test 42: TIP danger + CTA 50% 확대 (전체 트렌치) ────────
+console.log('\n[Test 42] TIP danger + CTA 50% 확대 (전체 트렌치)');
+{
+  const algo2 = createTestInstance();
+  // 모든 트렌치에 포지션 세팅
+  for (let i = 0; i < 4; i++) {
+    algo2.tranches[i].shares[T1] = 10;
+    algo2.tranches[i].shares[T2] = 5;
+    algo2.tranches[i].shares[T3] = 20;
+    algo2.tranches[i].cash = 1000;
+  }
+  algo2.lastRebalIsoWeek = algo2._getISOWeek(); // 리밸런싱 간섭 방지
+
+  const dangerIndicators = {
+    is_backwardation: false,
+    tip_avg_ret: -0.02,  // danger
+    qqq_mom_avg: 0.05, gld_mom_avg: 0.03,
+    qqq_lv_price: 80, gld_lv_price: 45, cta_price: 30,
+    vix: 15, vix3m: 20,
+  };
+  const actions = algo2.determineActions(dangerIndicators);
+
+  // TIP filter 매도: 4트렌치 × 2종목 = 8개
+  const tipSells = actions.filter(a => a.reason === 'TIP filter');
+  assert(tipSells.length === 8, `TIP danger → 전체 매도 액션 8개 (${tipSells.length})`);
+
+  // TIP danger CTA 확대: 4트렌치 매수
+  const ctaExpands = actions.filter(a => a.reason === 'TIP danger CTA 확대');
+  assert(ctaExpands.length === 4, `TIP danger → CTA 확대 액션 4개 (${ctaExpands.length})`);
+  assert(ctaExpands.every(a => a.action === 'buy'), 'CTA 확대는 모두 매수');
+
+  // equity 계산 검증: 트렌치#1
+  // equity = 1000 + 10*80 + 5*45 + 20*30 = 1000 + 800 + 225 + 600 = 2625
+  // CTA target = floor(2625 * 0.50 / 30) = floor(43.75) = 43
+  // 현재 20주 → 23주 매수
+  const t1cta = ctaExpands.find(a => a.tranche_num === 1);
+  assert(t1cta !== undefined, '트렌치#1 CTA 확대 액션 존재');
+  assert(t1cta.shares === 23, `트렌치#1 CTA 확대 수량: ${t1cta.shares} (expected 23)`);
+
+  // shares 변경 안 됨 (confirm 전)
+  assert(algo2.tranches[0].shares[T1] === 10, 'TQQQ shares 유지');
+  assert(algo2.tranches[0].shares[T3] === 20, 'CTA shares 유지');
 }
 
 

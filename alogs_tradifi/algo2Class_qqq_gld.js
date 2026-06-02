@@ -35,7 +35,7 @@ export class Algo2QqqGld {
   static GLD_MOM_BUFFER         = 0.001;
   static GLD_MOM_FILTER_ENABLED = false;
 
-  static WEIGHTS          = [0.35, 0.35, 0.30];
+  static WEIGHTS          = [0.40, 0.40, 0.20];
   static TIP_DANGER_WEIGHTS = [0.25, 0.25, 0.50];
 
   constructor() {
@@ -98,6 +98,9 @@ export class Algo2QqqGld {
 
   async scheduleFunc() {
     try {
+      // Firestore에서 최신 상태 reload
+      await this._loadTranchesFromFirestore();
+
       // [신규] 이전 pending action 알림
       if (this.pendingActions.length > 0) {
         const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
@@ -136,6 +139,23 @@ export class Algo2QqqGld {
   }
 
   // ─── 내부 메서드 ─────────────────────────────────────────────
+
+  /** Firestore에서 트렌치 상태 reload (scheduleFunc/_cmdCheck 시작 시) */
+  async _loadTranchesFromFirestore() {
+    const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
+    for (let i = 1; i <= 4; i++) {
+      const data = await getSubDoc('qqq_gld', 'tranches', String(i));
+      if (data) {
+        // 기존 tranche가 있으면 업데이트 (shares, cash, avg_price)
+        const t = this.tranches[i - 1];
+        if (t) {
+          t.cash = data.cash ?? t.cash;
+          t.shares = data.shares ?? t.shares;
+          t.avg_price = data.avg_price ?? t.avg_price;
+        }
+      }
+    }
+  }
 
   async fetchIndicators() {
     const { TICKER_QQQ, TICKER_GLD, TICKER_TIP, TICKER_VIX, TICKER_VIX3M, TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
@@ -339,31 +359,42 @@ export class Algo2QqqGld {
     const gldCanHold = (!TIP_FILTER_ENABLED || this.tip_state === 'normal')
                     && (!GLD_MOM_FILTER_ENABLED || this.gld_mom_state === 'normal');
 
-    // [1] TIP 필터: 모든 트렌치 QQQ_LV+GLD_LV 전량 청산 (CTA는 제외)
+    // 중복 매도 방지: 이미 actions에 같은 (tranche_num, ticker) sell 있는지 확인
+    const alreadySold = (tNum, tk) => actions.some(a => a.tranche_num === tNum && a.ticker === tk && a.action === 'sell');
+
+    // [1] TIP 필터: 모든 트렌치 QQQ_LV+GLD_LV 전량 청산 + CTA 비중 50% 확대
     if (TIP_FILTER_ENABLED && this.tip_state === 'danger') {
       for (const t of this.tranches) {
-        if (t.shares[TICKER_QQQ_LV] > 0) {
+        // QQQ 매도 (중복 방지: actions 배열 조회)
+        if (t.shares[TICKER_QQQ_LV] > 0 && !alreadySold(t.tranche_num, TICKER_QQQ_LV)) {
           actions.push({
             tranche_num: t.tranche_num, ticker: TICKER_QQQ_LV, action: 'sell',
             shares: t.shares[TICKER_QQQ_LV], price: qqq_lv_price, reason: 'TIP filter',
           });
-          t.shares[TICKER_QQQ_LV] = 0;
         }
-        if (t.shares[TICKER_GLD_LV] > 0) {
+        // GLD 매도
+        if (t.shares[TICKER_GLD_LV] > 0 && !alreadySold(t.tranche_num, TICKER_GLD_LV)) {
           actions.push({
             tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'sell',
             shares: t.shares[TICKER_GLD_LV], price: gld_lv_price, reason: 'TIP filter',
           });
-          t.shares[TICKER_GLD_LV] = 0;
+        }
+        // CTA 50% 비중 확대 (매수) — shares 직접 수정 없이 equity 계산
+        const eq = t.cash + t.shares[TICKER_QQQ_LV]*qqq_lv_price + t.shares[TICKER_GLD_LV]*gld_lv_price + t.shares[TICKER_CTA_LV]*cta_price;
+        const targetCta = Math.floor(eq * this.weights[2] / cta_price);
+        if (targetCta > t.shares[TICKER_CTA_LV]) {
+          actions.push({
+            tranche_num: t.tranche_num, ticker: TICKER_CTA_LV, action: 'buy',
+            shares: targetCta - t.shares[TICKER_CTA_LV], price: cta_price, reason: 'TIP danger CTA 확대',
+          });
         }
       }
-      // early return 제거 → 이후 로직(CTA 리밸런싱) 계속 진행
     }
 
     // [2] VIX 백워데이션: 모든 트렌치 QQQ_LV만 청산
     if (VIX_FILTER_ENABLED && this.vix_ts_state === 1) {
       for (const t of this.tranches) {
-        if (t.shares[TICKER_QQQ_LV] > 0) {
+        if (t.shares[TICKER_QQQ_LV] > 0 && !alreadySold(t.tranche_num, TICKER_QQQ_LV)) {
           actions.push({
             tranche_num: t.tranche_num, ticker: TICKER_QQQ_LV, action: 'sell',
             shares: t.shares[TICKER_QQQ_LV], price: qqq_lv_price, reason: 'VIX backwardation',
@@ -375,7 +406,7 @@ export class Algo2QqqGld {
     // [3] QQQ 모멘텀 필터: 모든 트렌치 QQQ_LV만 청산
     if (QQQ_MOM_FILTER_ENABLED && this.qqq_mom_state === 'danger') {
       for (const t of this.tranches) {
-        if (t.shares[TICKER_QQQ_LV] > 0) {
+        if (t.shares[TICKER_QQQ_LV] > 0 && !alreadySold(t.tranche_num, TICKER_QQQ_LV)) {
           actions.push({
             tranche_num: t.tranche_num, ticker: TICKER_QQQ_LV, action: 'sell',
             shares: t.shares[TICKER_QQQ_LV], price: qqq_lv_price, reason: 'QQQ mom filter',
@@ -387,7 +418,7 @@ export class Algo2QqqGld {
     // [4] GLD 모멘텀 필터: 모든 트렌치 GLD_LV만 청산
     if (GLD_MOM_FILTER_ENABLED && this.gld_mom_state === 'danger') {
       for (const t of this.tranches) {
-        if (t.shares[TICKER_GLD_LV] > 0) {
+        if (t.shares[TICKER_GLD_LV] > 0 && !alreadySold(t.tranche_num, TICKER_GLD_LV)) {
           actions.push({
             tranche_num: t.tranche_num, ticker: TICKER_GLD_LV, action: 'sell',
             shares: t.shares[TICKER_GLD_LV], price: gld_lv_price, reason: 'GLD mom filter',
@@ -407,7 +438,9 @@ export class Algo2QqqGld {
         const holds = [qqqCanHold, gldCanHold, true];  // CTA 항상 true
         const prices = { [TICKER_QQQ_LV]: qqq_lv_price, [TICKER_GLD_LV]: gld_lv_price, [TICKER_CTA_LV]: cta_price };
         const rebalActions = this._calcRebalanceActions(t, prices, holds);
-        actions.push(...rebalActions);
+        // 중복 매도 방지: 이미 actions에 sell이 있는 항목 제외
+        const filteredRebalActions = rebalActions.filter(a => !(a.action === 'sell' && alreadySold(a.tranche_num, a.ticker)));
+        actions.push(...filteredRebalActions);
       }
     }
 
@@ -742,6 +775,9 @@ export class Algo2QqqGld {
   /** 현재 상태 기준 pending 재계산 + 저장 */
   async _cmdCheck() {
     if (this.tranches.length !== 4) return 'init 먼저 실행';
+
+    // Firestore에서 최신 상태 reload
+    await this._loadTranchesFromFirestore();
 
     const indicators = await this.fetchIndicators();
     const actions = this.determineActions(indicators);
