@@ -1,5 +1,9 @@
+#!/usr/bin/env node
 import dotenv from 'dotenv';
-dotenv.config({ override: true });
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '.env'), override: true });
 
 import { consoleLogger } from './common/logger.js';
 import { initCLI } from './common/cli.js';

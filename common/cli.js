@@ -16,7 +16,7 @@ export function registerCommand(name, handler) {
  *
  * handleCommand 반환값:
  *   - string → 바로 출력
- *   - { prompt: string, handler: async (input) => string } → 서브 프롬프트 진입
+ *   - { instruction?: string, handler: async (input) => string } → 서브 프롬프트 진입
  */
 export function initCLI(strategyMap, cronTasks = {}) {
   registerCommand('help', () => {
@@ -89,20 +89,35 @@ export function initCLI(strategyMap, cronTasks = {}) {
   console.log(commands['help']());
   rl.prompt();
 
+  /** 서브프롬프트 진입 헬퍼 — instruction console.log → handler 저장 → rl.prompt */
+  const enterSubPrompt = (result) => {
+    if (result.instruction) console.log(result.instruction);
+    pendingHandler = result.handler;
+    rl.prompt();
+  };
+
   rl.on('line', async (line) => {
     const trimmed = line.trim();
-    if (!trimmed) {
-      rl.prompt();
-      return;
-    }
 
-    // 서브 프롬프트 대기 중이면 해당 핸들러로 전달
+    // 서브 프롬프트 대기 중
     if (pendingHandler) {
+      if (trimmed === 'q' || trimmed === 'quit') {
+        pendingHandler = null;
+        console.log('취소됨');
+        rl.prompt();
+        return;
+      }
+      // 해당 핸들러로 전달
       const handler = pendingHandler;
       pendingHandler = null;
       try {
         const result = await handler(trimmed);
-        if (result) console.log(result);
+        if (result && typeof result === 'object' && result.instruction) {
+          enterSubPrompt(result);
+          return;
+        } else if (result) {
+          console.log(result);
+        }
       } catch (err) {
         consoleLogger.error('서브 프롬프트 실행 오류:', err);
       }
@@ -124,10 +139,9 @@ export function initCLI(strategyMap, cronTasks = {}) {
 
     try {
       const result = await cmd(subCmd, args);
-      if (result && typeof result === 'object' && result.prompt) {
+      if (result && typeof result === 'object' && result.instruction) {
         // 서브 프롬프트 요청
-        process.stdout.write(result.prompt + ': ');
-        pendingHandler = result.handler;
+        enterSubPrompt(result);
         return;
       } else if (result) {
         console.log(result);

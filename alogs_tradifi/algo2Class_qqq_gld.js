@@ -606,6 +606,16 @@ export class Algo2QqqGld {
 
   /** ta status 용 한 줄 요약 */
   getStatusSummary() {
+    const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
+    if (this.lastSignals) {
+      for (const t of this.tranches) {
+        t.updateEquity({
+          [TICKER_QQQ_LV]: this.lastSignals.qqq_lv_price ?? 0,
+          [TICKER_GLD_LV]: this.lastSignals.gld_lv_price ?? 0,
+          [TICKER_CTA_LV]: this.lastSignals.cta_price ?? 0,
+        });
+      }
+    }
     const totalEquity = this.tranches.reduce((s, t) => s + t.equity, 0);
     const vixStr = this.vix_ts_state === 0 ? 'cont' : 'bwd';
     let msg = `  총자산: $${totalEquity.toFixed(0)}, 트렌치 ${this.tranches.length}개\n`;
@@ -618,21 +628,66 @@ export class Algo2QqqGld {
 
   _cmdStatus(args) {
     const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV } = Algo2QqqGld;
+
+    // Refresh equity from lastSignals if available
+    if (this.lastSignals) {
+      for (const t of this.tranches) {
+        t.updateEquity({
+          [TICKER_QQQ_LV]: this.lastSignals.qqq_lv_price ?? 0,
+          [TICKER_GLD_LV]: this.lastSignals.gld_lv_price ?? 0,
+          [TICKER_CTA_LV]: this.lastSignals.cta_price ?? 0,
+        });
+      }
+    }
+
+    const _sigPrice = (tk) => {
+      if (!this.lastSignals) return null;
+      if (tk === TICKER_QQQ_LV) return this.lastSignals.qqq_lv_price;
+      if (tk === TICKER_GLD_LV) return this.lastSignals.gld_lv_price;
+      if (tk === TICKER_CTA_LV) return this.lastSignals.cta_price;
+      return null;
+    };
+
+    const _fmtTickers = (t) => {
+      const tickers = [TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV];
+      let s = `트렌치#${t.tranche_num}: equity $${t.equity.toFixed(0)} (현금 $${t.cash.toFixed(0)})\n`;
+      for (const tk of tickers) {
+        const price = _sigPrice(tk);
+        if (price && t.shares[tk] > 0) {
+          const posValue = t.shares[tk] * price;
+          const pnl = (price - t.avg_price[tk]) * t.shares[tk];
+          const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(0)}` : `-$${Math.abs(pnl).toFixed(0)}`;
+          s += `  ${tk} ${t.shares[tk]}주 avg $${t.avg_price[tk].toFixed(2)} / 현재 $${price.toFixed(2)} = $${posValue.toFixed(0)} (${pnlStr})\n`;
+        }
+      }
+      return s;
+    };
+
     const trancheNum = args[0] ? parseInt(args[0]) : null;
 
     if (trancheNum) {
       const t = this.tranches.find(tr => tr.tranche_num === trancheNum);
       if (!t) return `트렌치 #${trancheNum} 없음`;
-      return `트렌치#${t.tranche_num}: equity=$${t.equity.toFixed(0)}, ${TICKER_QQQ_LV} ${t.shares[TICKER_QQQ_LV]}주(avg $${t.avg_price[TICKER_QQQ_LV].toFixed(2)}), ${TICKER_GLD_LV} ${t.shares[TICKER_GLD_LV]}주(avg $${t.avg_price[TICKER_GLD_LV].toFixed(2)}), ${TICKER_CTA_LV} ${t.shares[TICKER_CTA_LV]}주(avg $${t.avg_price[TICKER_CTA_LV].toFixed(2)}), 현금 $${t.cash.toFixed(0)}`;
+      return _fmtTickers(t).trim();
     }
 
     let result = '=== QQQ+GLD 트렌치 현황 ===\n';
     let totalEquity = 0;
+    let totalPnl = 0;
     for (const t of this.tranches) {
       totalEquity += t.equity;
-      result += `  트렌치#${t.tranche_num}: $${t.equity.toFixed(0)} (${TICKER_QQQ_LV} ${t.shares[TICKER_QQQ_LV]}주 + ${TICKER_GLD_LV} ${t.shares[TICKER_GLD_LV]}주 + ${TICKER_CTA_LV} ${t.shares[TICKER_CTA_LV]}주 + 현금 $${t.cash.toFixed(0)})\n`;
+      result += _fmtTickers(t);
+      // Accumulate PnL from tickers for total
+      const tickers = [TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA_LV];
+      for (const tk of tickers) {
+        const price = _sigPrice(tk);
+        if (price && t.shares[tk] > 0) {
+          totalPnl += (price - t.avg_price[tk]) * t.shares[tk];
+        }
+      }
     }
-    result += `  합계: $${totalEquity.toFixed(0)}\n`;
+    const totalPnlStr = totalPnl >= 0 ? `+$${totalPnl.toFixed(0)}` : `-$${Math.abs(totalPnl).toFixed(0)}`;
+    result += `합계: $${totalEquity.toFixed(0)} (평가손익 ${totalPnlStr})\n`;
 
     const { TIP_BUFFER, VIX_TS_BUFFER, QQQ_MOM_BUFFER, GLD_MOM_BUFFER,
             TIP_FILTER_ENABLED, VIX_FILTER_ENABLED, QQQ_MOM_FILTER_ENABLED, GLD_MOM_FILTER_ENABLED } = Algo2QqqGld;
@@ -669,68 +724,88 @@ export class Algo2QqqGld {
 
   /** 초기 포트폴리오 세팅 — 서브 프롬프트 */
   _cmdInit() {
-    return {
-      prompt: `${Algo2QqqGld.TICKER_QQQ_LV}수량 ${Algo2QqqGld.TICKER_QQQ_LV}현재가 ${Algo2QqqGld.TICKER_GLD_LV}수량 ${Algo2QqqGld.TICKER_GLD_LV}현재가 ${Algo2QqqGld.TICKER_CTA}수량 ${Algo2QqqGld.TICKER_CTA}현재가 순서로 입력 (예: 39 85.5 40 52.3 60 28.1)`,
-      handler: async (input) => {
-        const parts = input.trim().split(/\s+/);
-        if (parts.length < 6) return '입력값 부족 (예: 39 85.5 40 52.3 60 28.1)';
+    const self = this;
+    const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA } = Algo2QqqGld;
+    const inp = {};
 
-        const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA } = Algo2QqqGld;
-        const qqqLvShares = parseInt(parts[0]);
-        const qqqLvPrice = parseFloat(parts[1]);
-        const gldLvShares = parseInt(parts[2]);
-        const gldLvPrice = parseFloat(parts[3]);
-        const ctaShares = parseInt(parts[4]);
-        const ctaPrice = parseFloat(parts[5]);
+    const stepPrompt = (ticker, next) => ({
+      instruction: `${ticker} 수량 평단가:`,
+      handler: next,
+    });
 
-        if ([qqqLvShares, qqqLvPrice, gldLvShares, gldLvPrice, ctaShares, ctaPrice].some(v => isNaN(v) || v < 0)) {
-          return '잘못된 입력값, 숫자 확인';
-        }
+    const execInit = async () => {
+      const { TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA } = Algo2QqqGld;
+      const { qqq, gld, cta } = inp;
+      const qqqBase = Math.floor(qqq.shares / 4), qqqRem = qqq.shares % 4;
+      const gldBase = Math.floor(gld.shares / 4), gldRem = gld.shares % 4;
+      const ctaBase = Math.floor(cta.shares / 4), ctaRem = cta.shares % 4;
 
-        const qqqLvBase = Math.floor(qqqLvShares / 4);
-        const qqqLvRem = qqqLvShares % 4;
-        const gldLvBase = Math.floor(gldLvShares / 4);
-        const gldLvRem = gldLvShares % 4;
-        const ctaBase = Math.floor(ctaShares / 4);
-        const ctaRem = ctaShares % 4;
+      self.tranches = [];
+      const results = [];
 
-        this.tranches = [];
-        const results = [];
+      for (let i = 0; i < 4; i++) {
+        const tQqq = qqqBase + (i < qqqRem ? 1 : 0);
+        const tGld = gldBase + (i < gldRem ? 1 : 0);
+        const tCta = ctaBase + (i < ctaRem ? 1 : 0);
+        const t = new Tranche(i + 1, 0, TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA);
+        t.shares[TICKER_QQQ_LV] = tQqq;
+        t.shares[TICKER_GLD_LV] = tGld;
+        t.shares[TICKER_CTA] = tCta;
+        t.avg_price[TICKER_QQQ_LV] = qqq.price;
+        t.avg_price[TICKER_GLD_LV] = gld.price;
+        t.avg_price[TICKER_CTA] = cta.price;
+        t.updateEquity({ [TICKER_QQQ_LV]: qqq.price, [TICKER_GLD_LV]: gld.price, [TICKER_CTA]: cta.price });
+        self.tranches.push(t);
+        await setSubDoc('qqq_gld', 'tranches', String(i + 1), t.toData());
+        results.push(`  트렌치#${i + 1}: ${TICKER_QQQ_LV} ${tQqq}주 + ${TICKER_GLD_LV} ${tGld}주 + ${TICKER_CTA} ${tCta}주 = $${t.equity.toFixed(0)}`);
+      }
 
-        for (let i = 0; i < 4; i++) {
-          const tQqqLv = qqqLvBase + (i < qqqLvRem ? 1 : 0);
-          const tGldLv = gldLvBase + (i < gldLvRem ? 1 : 0);
-          const tCta = ctaBase + (i < ctaRem ? 1 : 0);
-          const t = new Tranche(i + 1, 0, TICKER_QQQ_LV, TICKER_GLD_LV, TICKER_CTA);
-          t.shares[TICKER_QQQ_LV] = tQqqLv;
-          t.shares[TICKER_GLD_LV] = tGldLv;
-          t.shares[TICKER_CTA] = tCta;
-          t.avg_price[TICKER_QQQ_LV] = qqqLvPrice;
-          t.avg_price[TICKER_GLD_LV] = gldLvPrice;
-          t.avg_price[TICKER_CTA] = ctaPrice;
-          t.updateEquity({ [TICKER_QQQ_LV]: qqqLvPrice, [TICKER_GLD_LV]: gldLvPrice, [TICKER_CTA]: ctaPrice });
-          this.tranches.push(t);
-
-          await setSubDoc('qqq_gld', 'tranches', String(i + 1), t.toData());
-          results.push(`  트렌치#${i + 1}: ${TICKER_QQQ_LV} ${tQqqLv}주 + ${TICKER_GLD_LV} ${tGldLv}주 + ${TICKER_CTA} ${tCta}주 = $${t.equity.toFixed(0)}`);
-        }
-
-        const totalEquity = this.tranches.reduce((s, t) => s + t.equity, 0);
-        await this.clearPendingActions();
-        let msg = `=== 초기 세팅 완료 ===\n`;
-        msg += results.join('\n');
-        msg += `\n  합계: $${totalEquity.toFixed(0)}`;
-        consoleLogger.info(`${this.name} init 완료. 총 $${totalEquity.toFixed(0)}`);
-        return msg;
-      },
+      const totalEquity = self.tranches.reduce((s, t) => s + t.equity, 0);
+      await self.clearPendingActions();
+      let msg = `=== 초기 세팅 완료 ===\n`;
+      msg += results.join('\n');
+      msg += `\n  합계: $${totalEquity.toFixed(0)}`;
+      consoleLogger.info(`${self.name} init 완료. 총 $${totalEquity.toFixed(0)}`);
+      return msg;
     };
+
+    const parseLine = (line) => {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 2) return null;
+      const shares = parseInt(parts[0]), price = parseFloat(parts[1]);
+      if (isNaN(shares) || isNaN(price) || shares < 0 || price < 0) return null;
+      return { shares, price };
+    };
+
+    const step3 = async (line) => {
+      const v = parseLine(line);
+      if (!v) return stepPrompt(TICKER_CTA, step3);
+      inp.cta = v;
+      return execInit();
+    };
+
+    const step2 = async (line) => {
+      const v = parseLine(line);
+      if (!v) return stepPrompt(TICKER_GLD_LV, step2);
+      inp.gld = v;
+      return stepPrompt(TICKER_CTA, step3);
+    };
+
+    const step1 = async (line) => {
+      const v = parseLine(line);
+      if (!v) return stepPrompt(TICKER_QQQ_LV, step1);
+      inp.qqq = v;
+      return stepPrompt(TICKER_GLD_LV, step2);
+    };
+
+    return stepPrompt(TICKER_QQQ_LV, step1);
   }
 
   /** 현금 추가 투입 — 서브 프롬프트 */
   _cmdAdd() {
     if (this.tranches.length !== 4) return 'init 먼저 실행';
     return {
-      prompt: '추가 금액 입력 (예: 2400)',
+      instruction: '추가 금액 입력 (예: 2400):',
       handler: async (input) => {
         const amount = parseFloat(input.trim());
         if (isNaN(amount) || amount <= 0) return '금액 확인';
@@ -804,7 +879,7 @@ export class Algo2QqqGld {
   _cmdAdjust() {
     if (this.tranches.length !== 4) return 'init 먼저 실행';
     return {
-      prompt: '트렌치번호 ticker(TQQQ/UGL/CTA) buy/sell 수량 체결가 순서로 입력',
+      instruction: '트렌치번호 ticker(TQQQ/UGL/CTA) buy/sell 수량 체결가 순서로 입력:',
       handler: async (input) => {
         const parts = input.trim().split(/\s+/);
         if (parts.length < 5) return '입력 부족: <트렌치번호> <ticker> <buy/sell> <수량> <체결가>';
@@ -837,7 +912,6 @@ export class Algo2QqqGld {
           t.sell(ticker, shares, price);
         }
 
-        t.updateEquity(price, price);
         await setSubDoc('qqq_gld', 'tranches', String(trancheNum), t.toData());
         await addTradeLog('algo2_qqq_gld', {
           ticker, action, shares, price,
@@ -858,7 +932,7 @@ export class Algo2QqqGld {
   _cmdSub() {
     if (this.tranches.length !== 4) return 'init 먼저 실행';
     return {
-      prompt: '인출 금액 입력 (예: 2400)',
+      instruction: '인출 금액 입력 (예: 2400):',
       handler: async (input) => {
         const amount = parseFloat(input.trim());
         if (isNaN(amount) || amount <= 0) return '금액 확인';

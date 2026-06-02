@@ -415,7 +415,7 @@ export class Algo3MeanReversionQqq {
   /** 초기 자본 세팅 */
   _cmdInit() {
     return {
-      prompt: '운용 자본 입력 (예: 50000)',
+      instruction: '운용 자본 입력 (예: 50000):',
       handler: async (input) => {
         const amount = parseFloat(input.trim());
         if (isNaN(amount) || amount <= 0) return '금액 확인';
@@ -441,7 +441,7 @@ export class Algo3MeanReversionQqq {
   /** 현금 추가 */
   _cmdAdd() {
     return {
-      prompt: '추가 금액 입력 (예: 10000)',
+      instruction: '추가 금액 입력 (예: 10000):',
       handler: async (input) => {
         const amount = parseFloat(input.trim());
         if (isNaN(amount) || amount <= 0) return '금액 확인';
@@ -459,7 +459,7 @@ export class Algo3MeanReversionQqq {
   /** 현금 인출 */
   _cmdSub() {
     return {
-      prompt: '인출 금액 입력 (예: 10000)',
+      instruction: '인출 금액 입력 (예: 10000):',
       handler: async (input) => {
         const amount = parseFloat(input.trim());
         if (isNaN(amount) || amount <= 0) return '금액 확인';

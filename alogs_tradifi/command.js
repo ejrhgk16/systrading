@@ -90,7 +90,7 @@ async function cmdTaConfirm(strategies) {
   prompt += '\n번호 체결가 / 번호 open / all / all open 입력';
 
   return {
-    prompt,
+    instruction: prompt,
     handler: async (input) => {
       const trimmed = input.trim();
 

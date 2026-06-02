@@ -1,4 +1,8 @@
 {
+  "name": "systrading",
+  "bin": {
+    "systrading": "./main.js"
+  },
   "scripts": {
     "preview": "vite preview",
     "harness": "node tools/scripts/execute.mjs",

@@ -18,7 +18,7 @@ export function registerCryptoCommands(strategies) {
 
     if (subCmd === 'setstop') {
       return {
-        prompt: '종목 종류 수량 가격 순서로 입력\n종류: atr_stop, exit1, exit2, exit3\n예) BTCUSDT atr_stop 0.054 82000',
+        instruction: '종목 종류 수량 가격 순서로 입력\n종류: atr_stop, exit1, exit2, exit3\n예) BTCUSDT atr_stop 0.054 82000:',
         handler: async (input) => {
           const [symbol, type, qtyStr, priceStr] = input.trim().split(/\s+/);
           if (!symbol || !type || !qtyStr || !priceStr) return '입력 형식 오류. 예) BTCUSDT atr_stop 0.054 82000';
@@ -34,7 +34,7 @@ export function registerCryptoCommands(strategies) {
 
     if (subCmd === 'setstop2') {
       return {
-        prompt: '심볼 방향 순서로 입력\n방향: long, short\n예) BTCUSDT long',
+        instruction: '심볼 방향 순서로 입력\n방향: long, short\n예) BTCUSDT long:',
         handler: async (input) => {
           const [symbol, side] = input.trim().split(/\s+/);
           if (!symbol || !side) return '입력 형식 오류. 예) BTCUSDT long';

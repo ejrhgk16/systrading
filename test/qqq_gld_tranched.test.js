@@ -388,8 +388,8 @@ console.log('\n[Test 20] _cmdInit prompt CTA 포함');
   const algo = createTestInstance();
   const cmd = algo._cmdInit();
   assert(typeof cmd.prompt === 'string', '_cmdInit가 prompt 문자열 반환');
-  assert(cmd.prompt.includes('CTA'), '_cmdInit prompt에 CTA 티커 표시');
-  assert(cmd.prompt.includes('6'), '_cmdInit prompt에 6개 입력 예시 포함');
+  assert(cmd.prompt.includes('TQQQ'), '_cmdInit 첫 prompt에 TQQQ 표시');
+  assert(cmd.prompt.includes('평단가'), '_cmdInit prompt에 평단가 표시');
   assert(typeof cmd.handler === 'function', '_cmdInit가 handler 함수 반환');
 }
 
